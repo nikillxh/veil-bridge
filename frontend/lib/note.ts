@@ -32,10 +32,16 @@ export function serializeNote(note: Note): string {
 export async function parseNote(serialized: string): Promise<Note> {
   const parts = serialized.trim().split(":");
   if (parts.length !== 3 || parts[0] !== PREFIX) {
-    throw new Error("Invalid note format");
+    throw new Error("Invalid note format. Expected qie-note-v1:<nullifier>:<secret>.");
+  }
+  if (!/^[0-9a-fA-F]+$/.test(parts[1]) || !/^[0-9a-fA-F]+$/.test(parts[2])) {
+    throw new Error("Invalid note: nullifier and secret must be hex.");
   }
   const nullifier = BigInt("0x" + parts[1]);
   const secret = BigInt("0x" + parts[2]);
+  if (nullifier >= FIELD_SIZE || secret >= FIELD_SIZE) {
+    throw new Error("Invalid note: value out of field.");
+  }
   const commitment = await poseidon([nullifier, secret]);
   const nullifierHash = await poseidon([nullifier]);
   return { nullifier, secret, commitment, nullifierHash };

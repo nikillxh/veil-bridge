@@ -34,7 +34,7 @@ flowchart LR
 | [`sp1-program/`](sp1-program) | `bridge-core` (header + MPT inclusion verification) and the SP1 guest program. |
 | [`relayer/`](relayer) | Rust relayer: watch source, prove root inclusion (SP1 or native verification), submit to QIE. |
 | [`client/`](client) | TypeScript SDK + CLIs: note generation, Merkle proofs, Groth16 proving, deposit, claim. |
-| [`frontend/`](frontend) | Next.js dapp: multi-wallet connect (EIP-6963), deposit, in-browser proving, claim. |
+| [`frontend/`](frontend) | Next.js dapp: multi-wallet connect (EIP-6963), deposit, in-browser proving, claim, in-app docs. State persists across tabs; themed success dialogs; QIE logo palette. |
 | [`scripts/`](scripts) | `e2e_local.sh`, `run_local.sh` (full stack + UI), `deploy_testnet.sh`, `test_testnet_e2e.sh`. |
 | [`docs/`](docs) | Architecture, trust model, funding, and usage walkthrough. |
 

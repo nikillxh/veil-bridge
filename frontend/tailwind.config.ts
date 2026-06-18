@@ -6,23 +6,29 @@ const config: Config = {
     extend: {
       colors: {
         ink: {
-          950: "#06070d",
-          900: "#0a0c16",
-          800: "#11141f",
-          700: "#1a1e2e",
-          600: "#272c3f",
+          950: "#08060d",
+          900: "#0d0a16",
+          800: "#150f1f",
+          700: "#201829",
+          600: "#2e2238",
         },
+        // QIE logo palette: pink/magenta -> fuchsia -> purple -> indigo.
         brand: {
-          50: "#eef9ff",
-          200: "#b6e6ff",
-          400: "#48c6ff",
-          500: "#19adff",
-          600: "#068ae6",
+          50: "#fdeef7",
+          200: "#f7b8dd",
+          400: "#ee5fae",
+          500: "#e8388f",
+          600: "#c42a98",
         },
         iris: {
-          400: "#a78bfa",
-          500: "#8b5cf6",
-          600: "#7c3aed",
+          400: "#b06fe6",
+          500: "#9333ea",
+          600: "#7c2bcf",
+        },
+        indigo: {
+          400: "#7a6cf0",
+          500: "#5b43d6",
+          600: "#4a36b8",
         },
       },
       fontFamily: {

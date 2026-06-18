@@ -1,16 +1,17 @@
 "use client";
 
-import { useState } from "react";
 import { useAccount, usePublicClient, useWriteContract } from "wagmi";
 import { formatEther, zeroAddress } from "viem";
 import { NetworkGuard } from "@/components/NetworkGuard";
 import { Stepper, type Step } from "@/components/Stepper";
 import { CopyField } from "@/components/CopyField";
 import { ConfigWarning } from "@/components/ConfigWarning";
+import { Modal } from "@/components/Modal";
 import { SOURCE_CHAIN } from "@/lib/chains";
 import { ADDRESSES, ERC20_ABI, VAULT_ABI } from "@/lib/contracts";
 import { createNote, serializeNote, type Note } from "@/lib/note";
 import { toBytes32 } from "@/lib/poseidon";
+import { useBridge } from "@/lib/bridgeStore";
 
 export default function DepositPage() {
   return (
@@ -34,53 +35,56 @@ function DepositFlow() {
   const publicClient = usePublicClient({ chainId: SOURCE_CHAIN.id });
   const { writeContractAsync } = useWriteContract();
 
-  const [busy, setBusy] = useState(false);
-  const [note, setNote] = useState<Note | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [steps, setSteps] = useState<Step[]>([]);
-  const [txHash, setTxHash] = useState<string | null>(null);
+  const { deposit: state, setDeposit } = useBridge();
+  const { busy, note, error, steps, txHash } = state;
 
   const configured = ADDRESSES.vault !== zeroAddress;
 
+  function setSteps(updater: (prev: Step[]) => Step[]) {
+    setDeposit((s) => ({ ...s, steps: updater(s.steps) }));
+  }
   function patch(i: number, s: Partial<Step>) {
     setSteps((prev) => prev.map((p, idx) => (idx === i ? { ...p, ...s } : p)));
   }
 
   async function run() {
     if (!publicClient || !address) return;
-    setBusy(true);
-    setError(null);
-    setNote(null);
-    setTxHash(null);
-
-    const fresh = await createNote();
-    const commitment = toBytes32(fresh.commitment);
-
-    const token = (await publicClient.readContract({
-      address: ADDRESSES.vault,
-      abi: VAULT_ABI,
-      functionName: "token",
-    })) as `0x${string}`;
-    const denom = (await publicClient.readContract({
-      address: ADDRESSES.vault,
-      abi: VAULT_ABI,
-      functionName: "denomination",
-    })) as bigint;
-    const isErc20 = token !== zeroAddress;
-
-    const flow: Step[] = [
-      { label: "Generate commitment", state: "done", detail: commitment },
-      ...(isErc20
-        ? ([
-            { label: "Mint test tokens", state: "idle" },
-            { label: "Approve vault", state: "idle" },
-          ] as Step[])
-        : []),
-      { label: `Deposit ${formatEther(denom)} to vault`, state: "idle" },
-    ];
-    setSteps(flow);
+    setDeposit((s) => ({
+      ...s,
+      busy: true,
+      error: null,
+      note: null,
+      txHash: null,
+      showSuccess: false,
+      steps: [{ label: "Generate commitment", state: "active" }],
+    }));
 
     try {
+      const fresh = await createNote();
+      const commitment = toBytes32(fresh.commitment);
+
+      const [token, denom] = (await Promise.all([
+        publicClient.readContract({ address: ADDRESSES.vault, abi: VAULT_ABI, functionName: "token" }),
+        publicClient.readContract({
+          address: ADDRESSES.vault,
+          abi: VAULT_ABI,
+          functionName: "denomination",
+        }),
+      ])) as [`0x${string}`, bigint];
+      const isErc20 = token !== zeroAddress;
+
+      const flow: Step[] = [
+        { label: "Generate commitment", state: "done", detail: commitment },
+        ...(isErc20
+          ? ([
+              { label: "Mint test tokens", state: "idle" },
+              { label: "Approve vault", state: "idle" },
+            ] as Step[])
+          : []),
+        { label: `Deposit ${formatEther(denom)} to vault`, state: "idle" },
+      ];
+      setDeposit((s) => ({ ...s, steps: flow }));
+
       let cursor = 1;
       if (isErc20) {
         const bal = (await publicClient.readContract({
@@ -124,13 +128,16 @@ function DepositFlow() {
       });
       await publicClient.waitForTransactionReceipt({ hash: dh });
       patch(cursor, { state: "done" });
-      setTxHash(dh);
-      setNote(fresh);
+      setDeposit((s) => ({ ...s, txHash: dh, note: fresh, showSuccess: true }));
     } catch (e: any) {
-      setError(e?.shortMessage ?? e?.message ?? "Transaction failed");
-      setSteps((prev) => prev.map((p) => (p.state === "active" ? { ...p, state: "error" } : p)));
+      const msg = e?.shortMessage ?? e?.message ?? "Transaction failed";
+      setDeposit((s) => ({
+        ...s,
+        error: msg,
+        steps: s.steps.map((p) => (p.state === "active" ? { ...p, state: "error" } : p)),
+      }));
     } finally {
-      setBusy(false);
+      setDeposit((s) => ({ ...s, busy: false }));
     }
   }
 
@@ -139,6 +146,7 @@ function DepositFlow() {
   }
 
   return (
+    <>
     <div className="grid gap-6 lg:grid-cols-5">
       <div className="glass space-y-5 p-6 lg:col-span-3">
         <div className="flex items-center justify-between">
@@ -197,6 +205,38 @@ function DepositFlow() {
         )}
       </div>
     </div>
+
+    <Modal
+      open={state.showSuccess && !!note}
+      onClose={() => setDeposit((s) => ({ ...s, showSuccess: false }))}
+      title="Deposit confirmed"
+      subtitle="Funds are locked. Save your secret note now to claim later."
+    >
+      {note ? (
+        <>
+          <div className="rounded-xl border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-sm text-amber-200">
+            Anyone with this note can claim. Losing it means losing the funds.
+          </div>
+          <CopyField label="Secret note" value={serializeNote(note)} />
+          <div className="flex gap-3">
+            <button onClick={() => downloadNote(note)} className="btn-ghost flex-1">
+              Download note
+            </button>
+            {txHash ? (
+              <a
+                href={`${SOURCE_CHAIN.blockExplorers?.default.url}/tx/${txHash}`}
+                target="_blank"
+                rel="noreferrer"
+                className="btn-ghost flex-1"
+              >
+                View transaction
+              </a>
+            ) : null}
+          </div>
+        </>
+      ) : null}
+    </Modal>
+    </>
   );
 }
 

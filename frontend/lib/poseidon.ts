@@ -7,11 +7,13 @@ export const FIELD_SIZE =
 /// Matches MerkleTreeWithHistory.ZERO_VALUE = keccak256("qie-bridge") % p.
 export const ZERO_VALUE = BigInt(keccak256(stringToBytes("qie-bridge"))) % FIELD_SIZE;
 
-let poseidonInstance: any | undefined;
+let poseidonPromise: Promise<any> | undefined;
 
 async function getPoseidon(): Promise<any> {
-  if (!poseidonInstance) poseidonInstance = await buildPoseidon();
-  return poseidonInstance;
+  // Cache the promise (not the resolved value) so concurrent first calls share
+  // a single buildPoseidon() instead of each spinning up the wasm.
+  if (!poseidonPromise) poseidonPromise = buildPoseidon();
+  return poseidonPromise;
 }
 
 export async function poseidon(inputs: bigint[]): Promise<bigint> {

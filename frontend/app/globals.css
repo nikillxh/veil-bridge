@@ -29,11 +29,11 @@ body {
   }
 
   .btn-primary {
-    @apply btn relative overflow-hidden text-ink-950;
-    background: linear-gradient(135deg, #48c6ff 0%, #8b5cf6 100%);
+    @apply btn relative overflow-hidden font-semibold text-white;
+    background: linear-gradient(135deg, #e8388f 0%, #9333ea 55%, #5b43d6 100%);
   }
   .btn-primary:not(:disabled):hover {
-    box-shadow: 0 10px 30px -10px rgba(72, 198, 255, 0.6);
+    box-shadow: 0 10px 30px -10px rgba(232, 56, 143, 0.65);
     transform: translateY(-1px);
   }
 
@@ -47,7 +47,7 @@ body {
 
   .field {
     @apply w-full rounded-xl border border-white/10 bg-ink-900/80 px-4 py-3 font-mono text-sm
-      text-slate-100 outline-none transition focus:border-brand-400/60 focus:ring-2 focus:ring-brand-400/20;
+      text-slate-100 outline-none transition focus:border-brand-500/60 focus:ring-2 focus:ring-brand-500/20;
   }
 
   .pill {
@@ -57,7 +57,7 @@ body {
 
   .gradient-text {
     @apply bg-clip-text text-transparent;
-    background-image: linear-gradient(120deg, #b6e6ff 10%, #a78bfa 90%);
+    background-image: linear-gradient(120deg, #ee5fae 5%, #9333ea 55%, #7a6cf0 95%);
   }
 
   .menu-item {

@@ -1,17 +1,18 @@
 "use client";
 
-import { useState } from "react";
 import { useAccount, usePublicClient, useWriteContract } from "wagmi";
 import { createPublicClient, http, zeroAddress } from "viem";
 import { NetworkGuard } from "@/components/NetworkGuard";
 import { Stepper, type Step } from "@/components/Stepper";
 import { ConfigWarning } from "@/components/ConfigWarning";
+import { Modal } from "@/components/Modal";
 import { QIE_CHAIN, SOURCE_CHAIN } from "@/lib/chains";
 import { ADDRESSES, MERKLE_LEVELS, POOL_ABI, UPDATER_ABI, VAULT_ABI } from "@/lib/contracts";
 import { parseNote } from "@/lib/note";
 import { PoseidonMerkleTree } from "@/lib/merkleTree";
 import { buildWitnessInput, generateProof } from "@/lib/proof";
 import { toBytes32 } from "@/lib/poseidon";
+import { useBridge } from "@/lib/bridgeStore";
 
 const DEPLOY_BLOCK = BigInt(process.env.NEXT_PUBLIC_VAULT_DEPLOY_BLOCK ?? "0");
 
@@ -37,32 +38,34 @@ function ClaimFlow() {
   const qieClient = usePublicClient({ chainId: QIE_CHAIN.id });
   const { writeContractAsync } = useWriteContract();
 
-  const [noteInput, setNoteInput] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [steps, setSteps] = useState<Step[]>([]);
-  const [done, setDone] = useState<string | null>(null);
+  const { claim: state, setClaim } = useBridge();
+  const { noteInput, busy, error, steps, done } = state;
 
   const configured = ADDRESSES.pool !== zeroAddress && ADDRESSES.vault !== zeroAddress;
 
   function patch(i: number, s: Partial<Step>) {
-    setSteps((prev) => prev.map((p, idx) => (idx === i ? { ...p, ...s } : p)));
+    setClaim((c) => ({
+      ...c,
+      steps: c.steps.map((p, idx) => (idx === i ? { ...p, ...s } : p)),
+    }));
   }
 
   async function run() {
     if (!qieClient || !address) return;
-    setBusy(true);
-    setError(null);
-    setDone(null);
-
-    const flow: Step[] = [
-      { label: "Parse note", state: "active" },
-      { label: "Rebuild Merkle tree from deposits", state: "idle" },
-      { label: "Check root is bridged to QIE", state: "idle" },
-      { label: "Generate zero knowledge proof", state: "idle" },
-      { label: "Submit claim", state: "idle" },
-    ];
-    setSteps(flow);
+    setClaim((c) => ({
+      ...c,
+      busy: true,
+      error: null,
+      done: null,
+      showSuccess: false,
+      steps: [
+        { label: "Parse note", state: "active" },
+        { label: "Rebuild Merkle tree from deposits", state: "idle" },
+        { label: "Check root is bridged to QIE", state: "idle" },
+        { label: "Generate zero knowledge proof", state: "idle" },
+        { label: "Submit claim", state: "idle" },
+      ],
+    }));
 
     try {
       const note = await parseNote(noteInput);
@@ -70,7 +73,10 @@ function ClaimFlow() {
 
       // Rebuild tree from source chain Deposit events.
       patch(1, { state: "active" });
-      const sourceClient = createPublicClient({ chain: SOURCE_CHAIN, transport: http() });
+      const sourceClient = createPublicClient({
+        chain: SOURCE_CHAIN,
+        transport: http(SOURCE_CHAIN.rpcUrls.default.http[0]),
+      });
       const logs = await sourceClient.getContractEvents({
         address: ADDRESSES.vault,
         abi: VAULT_ABI,
@@ -86,6 +92,9 @@ function ClaimFlow() {
         .sort((a, b) => a.index - b.index)
         .map((x) => x.commitment);
 
+      if (ordered.length === 0) {
+        throw new Error("No deposits found in the vault yet.");
+      }
       const myIndex = ordered.findIndex((c) => c === note.commitment);
       if (myIndex < 0) throw new Error("Commitment not found. Has the deposit been mined?");
       const tree = await PoseidonMerkleTree.create(MERKLE_LEVELS, ordered);
@@ -137,24 +146,29 @@ function ClaimFlow() {
       });
       await qieClient.waitForTransactionReceipt({ hash });
       patch(4, { state: "done" });
-      setDone(hash);
+      setClaim((c) => ({ ...c, done: hash, showSuccess: true }));
     } catch (e: any) {
-      setError(e?.shortMessage ?? e?.message ?? "Claim failed");
-      setSteps((prev) => prev.map((p) => (p.state === "active" ? { ...p, state: "error" } : p)));
+      const msg = e?.shortMessage ?? e?.message ?? "Claim failed";
+      setClaim((c) => ({
+        ...c,
+        error: msg,
+        steps: c.steps.map((p) => (p.state === "active" ? { ...p, state: "error" } : p)),
+      }));
     } finally {
-      setBusy(false);
+      setClaim((c) => ({ ...c, busy: false }));
     }
   }
 
   if (!configured) return <ConfigWarning what="pool or vault" />;
 
   return (
+    <>
     <div className="grid gap-6 lg:grid-cols-5">
       <div className="glass space-y-5 p-6 lg:col-span-3">
         <h2 className="text-lg font-medium text-white">Your note</h2>
         <textarea
           value={noteInput}
-          onChange={(e) => setNoteInput(e.target.value)}
+          onChange={(e) => setClaim((c) => ({ ...c, noteInput: e.target.value }))}
           placeholder="qie-note-v1:..."
           rows={3}
           className="field resize-none"
@@ -168,7 +182,10 @@ function ClaimFlow() {
               className="hidden"
               onChange={async (e) => {
                 const f = e.target.files?.[0];
-                if (f) setNoteInput((await f.text()).trim());
+                if (f) {
+                  const text = (await f.text()).trim();
+                  setClaim((c) => ({ ...c, noteInput: text }));
+                }
               }}
             />
           </label>
@@ -207,5 +224,32 @@ function ClaimFlow() {
         )}
       </div>
     </div>
+
+    <Modal
+      open={state.showSuccess && !!done}
+      onClose={() => setClaim((c) => ({ ...c, showSuccess: false }))}
+      title="Claim complete"
+      subtitle="The shielded transfer settled on QIE."
+    >
+      <div className="flex items-center gap-3 rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-3">
+        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-emerald-400/20 text-emerald-300">
+          <svg viewBox="0 0 20 20" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M5 10.5l3.5 3.5L15 6.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </span>
+        <p className="text-sm text-emerald-100">Wrapped tokens minted to your wallet.</p>
+      </div>
+      {done ? (
+        <a
+          href={`${QIE_CHAIN.blockExplorers?.default.url}/tx/${done}`}
+          target="_blank"
+          rel="noreferrer"
+          className="btn-ghost w-full"
+        >
+          View transaction on QIE
+        </a>
+      ) : null}
+    </Modal>
+    </>
   );
 }

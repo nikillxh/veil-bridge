@@ -140,9 +140,11 @@ veil-bridge/
 
 | Path | Responsibility |
 |------|----------------|
-| `app/` | App Router pages: landing, deposit, claim. |
-| `components/` | UI primitives. `ConnectButton` does multi-wallet EIP-6963 discovery (connect modal + account dropdown); `NetworkGuard` switches/adds the required chain. |
-| `lib/` | viem and wagmi config (multi-injected discovery on), chains (Sepolia, QIE 1983), Poseidon, Merkle tree, snarkjs proving in browser, contract ABIs and addresses. |
+| `app/` | App Router pages: landing, deposit, claim, docs. |
+| `app/docs/` | Designed in-app documentation (testnet walkthrough, privacy model, architecture diagram). Authored as React, not rendered markdown. |
+| `components/` | UI primitives. `ConnectButton` does multi-wallet EIP-6963 discovery (connect modal + account dropdown); `NetworkGuard` switches/adds the required chain; `Modal` is a portal-based themed dialog used for deposit/claim success. |
+| `lib/bridgeStore.tsx` | `BridgeProvider` context holding the deposit and claim flow state, mounted above the router so switching tabs preserves progress, the generated note, and results. |
+| `lib/` | viem and wagmi config (multi-injected discovery on), chains (Sepolia, QIE 1983), Poseidon (promise-cached), Merkle tree, snarkjs proving in browser (dynamic import), contract ABIs and addresses. Colors follow the QIE logo palette. |
 | `public/circuits/` | `withdraw.wasm` and `withdraw_final.zkey` served to the browser for client side proving. |
 
 ## Trust boundaries
