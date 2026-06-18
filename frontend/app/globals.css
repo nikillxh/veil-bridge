@@ -1,0 +1,80 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-feature-settings: "cv11", "ss01";
+  text-rendering: optimizeLegibility;
+}
+
+@layer components {
+  .glass {
+    @apply rounded-2xl border border-white/10 bg-white/[0.03] backdrop-blur-xl;
+    box-shadow:
+      0 1px 0 0 rgba(255, 255, 255, 0.06) inset,
+      0 30px 80px -40px rgba(0, 0, 0, 0.9);
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium
+      transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-40;
+  }
+
+  .btn-primary {
+    @apply btn relative overflow-hidden text-ink-950;
+    background: linear-gradient(135deg, #48c6ff 0%, #8b5cf6 100%);
+  }
+  .btn-primary:not(:disabled):hover {
+    box-shadow: 0 10px 30px -10px rgba(72, 198, 255, 0.6);
+    transform: translateY(-1px);
+  }
+
+  .btn-ghost {
+    @apply btn border border-white/10 bg-white/[0.02] text-slate-200 hover:border-white/20 hover:bg-white/[0.06];
+  }
+
+  .label {
+    @apply text-xs font-medium uppercase tracking-wider text-slate-400;
+  }
+
+  .field {
+    @apply w-full rounded-xl border border-white/10 bg-ink-900/80 px-4 py-3 font-mono text-sm
+      text-slate-100 outline-none transition focus:border-brand-400/60 focus:ring-2 focus:ring-brand-400/20;
+  }
+
+  .pill {
+    @apply inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.04]
+      px-3 py-1 text-xs font-medium;
+  }
+
+  .gradient-text {
+    @apply bg-clip-text text-transparent;
+    background-image: linear-gradient(120deg, #b6e6ff 10%, #a78bfa 90%);
+  }
+
+  .menu-item {
+    @apply block w-full cursor-pointer rounded-xl px-3 py-2 text-left text-sm text-slate-200
+      transition hover:bg-white/[0.06];
+  }
+}
+
+/* Thin, unobtrusive scrollbar */
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}

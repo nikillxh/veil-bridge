@@ -1,0 +1,21 @@
+[package]
+name = "bridge-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+alloy-primitives = { workspace = true }
+alloy-rlp = { workspace = true }
+alloy-consensus = { workspace = true }
+alloy-trie = { workspace = true }
+alloy-sol-types = { workspace = true }
+serde = { workspace = true }
+# Force-enable derive_more's `display` feature so transitive alloy crates
+# (alloy-eip7702) that rely on derive_more::Display compile under feature
+# unification.
+derive_more = { version = "1", default-features = false, features = ["display", "from"] }
+
+[features]
+default = ["std"]
+std = ["alloy-primitives/std", "alloy-rlp/std", "alloy-consensus/std", "alloy-trie/std", "alloy-sol-types/std", "serde/std"]

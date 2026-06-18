@@ -1,0 +1,211 @@
+"use client";
+
+import { useState } from "react";
+import { useAccount, usePublicClient, useWriteContract } from "wagmi";
+import { formatEther, zeroAddress } from "viem";
+import { NetworkGuard } from "@/components/NetworkGuard";
+import { Stepper, type Step } from "@/components/Stepper";
+import { CopyField } from "@/components/CopyField";
+import { ConfigWarning } from "@/components/ConfigWarning";
+import { SOURCE_CHAIN } from "@/lib/chains";
+import { ADDRESSES, ERC20_ABI, VAULT_ABI } from "@/lib/contracts";
+import { createNote, serializeNote, type Note } from "@/lib/note";
+import { toBytes32 } from "@/lib/poseidon";
+
+export default function DepositPage() {
+  return (
+    <div className="space-y-8">
+      <header className="space-y-2">
+        <h1 className="text-3xl font-semibold tracking-tight text-white">Private deposit</h1>
+        <p className="max-w-2xl text-slate-400">
+          Lock the fixed denomination on {SOURCE_CHAIN.name} behind a fresh commitment. Save the
+          note that appears: it is the only way to claim, and it must stay secret.
+        </p>
+      </header>
+      <NetworkGuard chainId={SOURCE_CHAIN.id} chainName={SOURCE_CHAIN.name}>
+        <DepositFlow />
+      </NetworkGuard>
+    </div>
+  );
+}
+
+function DepositFlow() {
+  const { address } = useAccount();
+  const publicClient = usePublicClient({ chainId: SOURCE_CHAIN.id });
+  const { writeContractAsync } = useWriteContract();
+
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<Note | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [steps, setSteps] = useState<Step[]>([]);
+  const [txHash, setTxHash] = useState<string | null>(null);
+
+  const configured = ADDRESSES.vault !== zeroAddress;
+
+  function patch(i: number, s: Partial<Step>) {
+    setSteps((prev) => prev.map((p, idx) => (idx === i ? { ...p, ...s } : p)));
+  }
+
+  async function run() {
+    if (!publicClient || !address) return;
+    setBusy(true);
+    setError(null);
+    setNote(null);
+    setTxHash(null);
+
+    const fresh = await createNote();
+    const commitment = toBytes32(fresh.commitment);
+
+    const token = (await publicClient.readContract({
+      address: ADDRESSES.vault,
+      abi: VAULT_ABI,
+      functionName: "token",
+    })) as `0x${string}`;
+    const denom = (await publicClient.readContract({
+      address: ADDRESSES.vault,
+      abi: VAULT_ABI,
+      functionName: "denomination",
+    })) as bigint;
+    const isErc20 = token !== zeroAddress;
+
+    const flow: Step[] = [
+      { label: "Generate commitment", state: "done", detail: commitment },
+      ...(isErc20
+        ? ([
+            { label: "Mint test tokens", state: "idle" },
+            { label: "Approve vault", state: "idle" },
+          ] as Step[])
+        : []),
+      { label: `Deposit ${formatEther(denom)} to vault`, state: "idle" },
+    ];
+    setSteps(flow);
+
+    try {
+      let cursor = 1;
+      if (isErc20) {
+        const bal = (await publicClient.readContract({
+          address: token,
+          abi: ERC20_ABI,
+          functionName: "balanceOf",
+          args: [address],
+        })) as bigint;
+        if (bal < denom) {
+          patch(cursor, { state: "active" });
+          const h = await writeContractAsync({
+            address: token,
+            abi: ERC20_ABI,
+            functionName: "mint",
+            args: [address, denom],
+          });
+          await publicClient.waitForTransactionReceipt({ hash: h });
+        }
+        patch(cursor, { state: "done" });
+        cursor++;
+
+        patch(cursor, { state: "active" });
+        const ah = await writeContractAsync({
+          address: token,
+          abi: ERC20_ABI,
+          functionName: "approve",
+          args: [ADDRESSES.vault, denom],
+        });
+        await publicClient.waitForTransactionReceipt({ hash: ah });
+        patch(cursor, { state: "done" });
+        cursor++;
+      }
+
+      patch(cursor, { state: "active" });
+      const dh = await writeContractAsync({
+        address: ADDRESSES.vault,
+        abi: VAULT_ABI,
+        functionName: "deposit",
+        args: [commitment],
+        value: isErc20 ? 0n : denom,
+      });
+      await publicClient.waitForTransactionReceipt({ hash: dh });
+      patch(cursor, { state: "done" });
+      setTxHash(dh);
+      setNote(fresh);
+    } catch (e: any) {
+      setError(e?.shortMessage ?? e?.message ?? "Transaction failed");
+      setSteps((prev) => prev.map((p) => (p.state === "active" ? { ...p, state: "error" } : p)));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!configured) {
+    return <ConfigWarning what="vault" />;
+  }
+
+  return (
+    <div className="grid gap-6 lg:grid-cols-5">
+      <div className="glass space-y-5 p-6 lg:col-span-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-medium text-white">Create deposit</h2>
+          <span className="pill text-slate-400">{SOURCE_CHAIN.name}</span>
+        </div>
+        <p className="text-sm leading-relaxed text-slate-400">
+          A new random note is generated in your browser. The commitment is sent on chain; the
+          secret never leaves this device.
+        </p>
+        <button onClick={run} disabled={busy} className="btn-primary w-full py-3">
+          {busy ? "Working" : "Generate note and deposit"}
+        </button>
+        {error ? (
+          <div className="rounded-xl border border-rose-400/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+            {error}
+          </div>
+        ) : null}
+        {steps.length > 0 ? (
+          <div className="rounded-xl border border-white/10 bg-ink-900/50 p-4">
+            <Stepper steps={steps} />
+          </div>
+        ) : null}
+      </div>
+
+      <div className="lg:col-span-2">
+        {note ? (
+          <div className="glass space-y-4 p-6">
+            <div className="flex items-center gap-2">
+              <span className="h-2 w-2 rounded-full bg-emerald-400" />
+              <h2 className="text-lg font-medium text-white">Deposit confirmed</h2>
+            </div>
+            <div className="rounded-xl border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-sm text-amber-200">
+              Save this note now. Anyone with it can claim. Losing it means losing the funds.
+            </div>
+            <CopyField label="Secret note" value={serializeNote(note)} />
+            <button onClick={() => downloadNote(note)} className="btn-ghost w-full">
+              Download note file
+            </button>
+            {txHash ? (
+              <a
+                href={`${SOURCE_CHAIN.blockExplorers?.default.url}/tx/${txHash}`}
+                target="_blank"
+                rel="noreferrer"
+                className="block text-center text-xs text-brand-400 hover:underline"
+              >
+                View deposit transaction
+              </a>
+            ) : null}
+          </div>
+        ) : (
+          <div className="glass flex h-full flex-col justify-center gap-3 p-6 text-sm text-slate-500">
+            <p>Your secret note will appear here after a successful deposit.</p>
+            <p>Keep it safe and claim later from a fresh wallet on QIE.</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function downloadNote(note: Note) {
+  const blob = new Blob([serializeNote(note)], { type: "text/plain" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `veil-note-${Date.now()}.txt`;
+  a.click();
+  URL.revokeObjectURL(url);
+}

@@ -1,0 +1,46 @@
+# Rust
+target/
+**/target/
+
+# Node
+node_modules/
+**/node_modules/
+
+# Foundry
+out/
+cache/
+broadcast/**/dry-run/
+
+# Circuit build artifacts (large; regenerate with `npm run build`)
+circuits/build/
+*.ptau
+*.zkey
+*.wasm
+*.r1cs
+*.sym
+
+# ...but the frontend MUST ship the proving assets (Vercel serves them).
+!frontend/public/circuits/
+!frontend/public/circuits/withdraw.wasm
+!frontend/public/circuits/withdraw_final.zkey
+
+# Next.js
+.next/
+frontend/.next/
+out/
+
+# Relayer / client runtime state and secrets
+relayer-state.json
+client/notes/
+.env
+**/.env
+*.note
+
+# Misc
+.DS_Store
+
+.agents
+
+local/
+
+skills-lock.json

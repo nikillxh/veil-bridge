@@ -1,0 +1,16 @@
+{
+  "name": "qie-bridge-circuits",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Circom Groth16 shielded-claim circuit for the QIE ZK Privacy Bridge",
+  "scripts": {
+    "compile": "bash scripts/compile.sh",
+    "setup": "bash scripts/setup.sh",
+    "export-verifier": "bash scripts/export-verifier.sh",
+    "build": "npm run compile && npm run setup && npm run export-verifier"
+  },
+  "dependencies": {
+    "circomlib": "^2.0.5",
+    "snarkjs": "^0.7.4"
+  }
+}

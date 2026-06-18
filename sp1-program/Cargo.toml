@@ -1,0 +1,20 @@
+[workspace]
+resolver = "2"
+members = ["bridge-core", "program"]
+
+# `program` is the SP1 guest and is built with the Succinct RISC-V toolchain
+# via `cargo prove build`; exclude it from the normal host check by default if
+# the toolchain is unavailable (build it explicitly from sp1-program/program).
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+version = "0.1.0"
+
+[workspace.dependencies]
+alloy-primitives = { version = "0.8", default-features = false, features = ["serde"] }
+alloy-rlp = { version = "0.3", default-features = false }
+alloy-consensus = { version = "0.8", default-features = false }
+alloy-trie = { version = "0.7", default-features = false }
+alloy-sol-types = { version = "0.8", default-features = false }
+serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
