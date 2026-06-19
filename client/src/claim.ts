@@ -83,6 +83,8 @@ async function main() {
     ethers.ZeroAddress,
     0n,
     0n,
+    // QIE underestimates gas for proof-verifying calls; set a generous limit.
+    { gasLimit: 1_500_000n },
   );
   console.log("claim tx:", tx.hash);
   const receipt = await tx.wait();

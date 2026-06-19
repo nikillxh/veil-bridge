@@ -79,6 +79,13 @@ export const POOL_ABI = [
     inputs: [{ type: "bytes32" }],
     outputs: [{ type: "bool" }],
   },
+  {
+    type: "function",
+    name: "denomination",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ type: "uint256" }],
+  },
 ] as const;
 
 export const UPDATER_ABI = [

@@ -11,6 +11,8 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 contract WrappedToken is ERC20, Ownable {
     /// @notice The only address allowed to mint/burn (the ShieldedPool).
     address public minter;
+    /// @notice Decimals mirror the bridged source asset (USDC == 6).
+    uint8 private immutable _decimals;
 
     event MinterUpdated(address indexed oldMinter, address indexed newMinter);
 
@@ -21,10 +23,16 @@ contract WrappedToken is ERC20, Ownable {
         _;
     }
 
-    constructor(string memory name_, string memory symbol_, address owner_)
+    constructor(string memory name_, string memory symbol_, uint8 decimals_, address owner_)
         ERC20(name_, symbol_)
         Ownable(owner_)
-    {}
+    {
+        _decimals = decimals_;
+    }
+
+    function decimals() public view override returns (uint8) {
+        return _decimals;
+    }
 
     function setMinter(address _minter) external onlyOwner {
         emit MinterUpdated(minter, _minter);

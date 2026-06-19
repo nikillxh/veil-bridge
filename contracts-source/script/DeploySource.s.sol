@@ -24,7 +24,8 @@ contract DeploySource is Script {
         vm.startBroadcast();
 
         if (token == address(type(uint160).max)) {
-            MockERC20 mock = new MockERC20();
+            // Local stand-in for USDC: 6 decimals to match the real token.
+            MockERC20 mock = new MockERC20("USD Coin", "USDC", 6);
             token = address(mock);
             console2.log("MockERC20:", token);
         }

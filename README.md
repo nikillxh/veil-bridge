@@ -69,30 +69,46 @@ bash scripts/run_local.sh
 ```
 
 It prints the localhost network details + an anvil key to import. Open
-`http://localhost:3000`, connect a wallet, deposit, then claim. No testnet ETH
-required.
+`http://localhost:3000`, connect a wallet, deposit, then claim. The local USDC
+stand-in is freely mintable, so no testnet funds are required.
+
+## Bridging real USDC privately
+
+The bridge moves real Sepolia USDC
+(`0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238`, 6 decimals) in fixed notes of
+0.01 USDC. On the Deposit page you choose how many identical 0.01 notes to
+create; identical denominations keep every deposit indistinguishable, which is
+what preserves the anonymity set. Each note is saved and claimed independently.
+
+Claims are gasless: you generate the Groth16 proof in your browser, and the
+server relayer submits the withdraw and pays QIE gas. Because the proof binds
+the recipient, the relayer cannot redirect funds, and the claim wallet needs no
+QIE coin (and no funding trail that could link it to the depositor).
 
 ## Deploy to testnet + Vercel
 
-The deploy is gas-lean: a free-mint ERC20 test token (`mUSD`) vault so visitors
-can try the live site without holding a specific asset, legacy gas pricing, a
-reused Poseidon hasher when one already exists, and an upfront balance precheck
-that aborts before spending if gas is too high. It also syncs the frontend env,
-deploys to Vercel production, and aliases `veilbridge.vercel.app`.
+The deploy wires the vault to real Sepolia USDC (no token is deployed), uses
+legacy gas pricing, reuses a Poseidon hasher when one already exists, and runs
+an upfront balance precheck that aborts before spending if gas is too high. It
+also syncs the frontend env, deploys to Vercel production, and aliases
+`veilbridge.vercel.app`.
 
 ```bash
-# Reads keys/RPCs from ./.env. MAIN must be funded on Sepolia + QIE.
+# Reads keys/RPCs from ./.env. The deployer must be funded on Sepolia + QIE,
+# and the depositor must hold USDC (Circle faucet: https://faucet.circle.com).
 bash scripts/deploy_testnet.sh            # contracts + Vercel env + prod deploy + alias
 SKIP_CONTRACTS=1 bash scripts/deploy_testnet.sh   # only redeploy the frontend
-bash scripts/test_testnet_e2e.sh          # live deposit -> relayer -> claim assert
+bash scripts/test_testnet_e2e.sh          # live deposit -> relayer -> gasless claim assert
 bash scripts/test_frontend_e2e.sh         # headless browser drives the real UI end to end
 ```
 
-Bridging roots is automated for the hosted site by a serverless route
-([`frontend/app/api/relay/route.ts`](frontend/app/api/relay/route.ts)): after a
-deposit, and again when a claim needs it, the latest vault root is submitted to
-`BridgeUpdater` on QIE using a server-only `RELAYER_PRIVATE_KEY`. For a
-continuously running, fully verified relayer use the Rust [`relayer/`](relayer).
+Bridging roots and gasless claims are automated for the hosted site by two
+serverless routes ([`frontend/app/api/relay/route.ts`](frontend/app/api/relay/route.ts)
+and [`frontend/app/api/claim/route.ts`](frontend/app/api/claim/route.ts)): the
+relay route submits the latest vault root to `BridgeUpdater` on QIE, and the
+claim route forwards a browser-generated proof to `ShieldedPool.withdraw`, both
+using a server-only `RELAYER_PRIVATE_KEY`. For a continuously running, fully
+verified relayer use the Rust [`relayer/`](relayer).
 
 Funding note: deploying the Poseidon hasher (~2.17M gas, fixed) plus the vault
 costs roughly 0.04 ETH at ~10 gwei and ~0.07 ETH at ~19 gwei on Sepolia. Run

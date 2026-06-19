@@ -13,7 +13,7 @@ import type { Note } from "./note";
 
 export interface DepositState {
   busy: boolean;
-  note: Note | null;
+  notes: Note[];
   error: string | null;
   steps: Step[];
   txHash: string | null;
@@ -31,7 +31,7 @@ export interface ClaimState {
 
 const depositInit: DepositState = {
   busy: false,
-  note: null,
+  notes: [],
   error: null,
   steps: [],
   txHash: null,

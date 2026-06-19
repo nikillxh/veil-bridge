@@ -23,7 +23,7 @@ ACCT=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
 # anvil default account #1 (fresh claimer)
 KEY2=0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d
 ACCT2=0x70997970C51812dc3A010C7d01b50e0d17dc79C8
-DENOM=1000000000000000000
+DENOM=10000   # 0.01 USDC (6 decimals)
 
 cleanup() { [ -n "${ANVIL_PID:-}" ] && kill "$ANVIL_PID" 2>/dev/null || true; }
 trap cleanup EXIT
@@ -39,11 +39,14 @@ echo "==> Deploying Poseidon(2) hasher"
 HASHER=$(cd "$ROOT_DIR/client" && SOURCE_RPC_URL=$RPC DEPLOYER_PRIVATE_KEY=$KEY npx tsx src/deployPoseidon.ts | grep HASHER_ADDRESS | cut -d= -f2)
 echo "    hasher=$HASHER"
 
-echo "==> Deploying ShieldedVault (source)"
+echo "==> Deploying ShieldedVault + local USDC mock (source)"
+# Sentinel TOKEN_ADDRESS forces a fresh 6-decimal USDC mock and overrides any
+# stale TOKEN_ADDRESS auto-loaded from ./.env by Foundry.
 SRC_OUT=$(cd "$ROOT_DIR/contracts-source" && HASHER_ADDRESS=$HASHER DENOMINATION=$DENOM LEVELS=20 \
+  TOKEN_ADDRESS=0xffffffffffffffffffffffffffffffffffffffff \
   forge script script/DeploySource.s.sol --rpc-url $RPC --private-key $KEY --broadcast 2>&1)
 VAULT=$(echo "$SRC_OUT" | grep "ShieldedVault:" | awk '{print $NF}')
-TOKEN=$(echo "$SRC_OUT" | grep "MockERC20:" | awk '{print $NF}')
+TOKEN=$(echo "$SRC_OUT" | grep -E "^\s*token:" | awk '{print $NF}')
 echo "    vault=$VAULT token=$TOKEN"
 
 echo "==> Deploying QIE side (updater, pool, wrapped token, verifier)"
@@ -60,7 +63,7 @@ NOTE=$(echo "$GEN" | grep "^NOTE=" | cut -d= -f2-)
 COMMIT=$(echo "$GEN" | grep "^COMMITMENT=" | cut -d= -f2-)
 echo "    note=$NOTE"
 echo "    commitment=$COMMIT"
-cast send "$TOKEN" "mint(address,uint256)" "$ACCT" 10000000000000000000 --rpc-url $RPC --private-key $KEY >/dev/null
+cast send "$TOKEN" "mint(address,uint256)" "$ACCT" 1000000 --rpc-url $RPC --private-key $KEY >/dev/null
 cast send "$TOKEN" "approve(address,uint256)" "$VAULT" "$DENOM" --rpc-url $RPC --private-key $KEY >/dev/null
 cast send "$VAULT" "deposit(bytes32)" "$COMMIT" --rpc-url $RPC --private-key $KEY >/dev/null
 
@@ -80,7 +83,7 @@ echo "==> Claiming from a FRESH wallet (real Groth16 proof)"
 (cd "$ROOT_DIR/client" && SOURCE_RPC_URL=$RPC QIE_RPC_URL=$RPC CLAIMER_PRIVATE_KEY=$KEY2 \
   VAULT_ADDRESS=$VAULT POOL_ADDRESS=$POOL NOTE="$NOTE" npx tsx src/claim.ts)
 
-BAL=$(cast call "$WRAPPED" "balanceOf(address)(uint256)" "$ACCT2" --rpc-url $RPC)
+BAL=$(cast call "$WRAPPED" "balanceOf(address)(uint256)" "$ACCT2" --rpc-url $RPC | awk '{print $1}')
 echo ""
 echo "==> RESULT: fresh wallet wrapped-token balance = $BAL"
-echo "$BAL" | grep -q "^1000000000000000000" && echo "SUCCESS: end-to-end shielded bridge worked!" || { echo "FAIL: unexpected balance"; exit 1; }
+[ "$BAL" = "$DENOM" ] && echo "SUCCESS: end-to-end shielded bridge worked!" || { echo "FAIL: unexpected balance"; exit 1; }

@@ -11,7 +11,7 @@ flowchart TB
     vault["ShieldedVault.sol"]
     tree["MerkleTreeWithHistory.sol"]
     hasher["Poseidon hasher (circomlibjs bytecode)"]
-    token["MockERC20.sol"]
+    token["USDC (testnet) / MockERC20 (local)"]
   end
 
   subgraph offchain [Off chain]
@@ -53,17 +53,16 @@ veil-bridge/
   frontend/              Next.js app, deployed to Vercel
   scripts/               e2e_local, run_local, deploy_testnet, test_testnet_e2e
   docs/                  ARCHITECTURE, TRUST_MODEL, USAGE, FUNDING
-  SUMMARY.md             Project orientation + operational rules
 ```
 
 ## scripts
 
 | File | Responsibility |
 |------|----------------|
-| `e2e_local.sh` | Single local node, full CLI pipeline (ERC20 vault). Fastest end-to-end check. |
-| `run_local.sh` | Two anvils (chain ids 11155111 + 1983), deploys all contracts, runs the relayer loop, writes `frontend/.env.local`, starts the dev server so the UI works with a real wallet. |
-| `deploy_testnet.sh` | Gas-lean Sepolia + QIE deploy (native vault, tiny denom, legacy gas, hasher reuse, balance precheck), syncs `NEXT_PUBLIC_*` to Vercel, ships production. `SKIP_CONTRACTS=1` redeploys only the frontend. |
-| `test_testnet_e2e.sh` | Live deposit -> relayer -> shielded claim assertion using `./.env` addresses. |
+| `e2e_local.sh` | Single local node, full CLI pipeline against a 6 decimal USDC mock at 0.01 per note. Fastest end-to-end check. |
+| `run_local.sh` | Two anvils (chain ids 11155111 + 1983), deploys all contracts (local USDC mock, mintable), runs the relayer loop, writes `frontend/.env.local` (including server keys for the API routes), starts the dev server so the UI works with a real wallet. |
+| `deploy_testnet.sh` | Sepolia + QIE deploy wiring the vault to real USDC (legacy gas, hasher reuse, balance precheck), syncs `NEXT_PUBLIC_*` + server env to Vercel, ships production. `SKIP_CONTRACTS=1` redeploys only the frontend. |
+| `test_testnet_e2e.sh` | Live deposit -> relayer -> gasless shielded claim assertion using `./.env` addresses. |
 
 ## contracts-source (Sepolia)
 
@@ -72,9 +71,9 @@ veil-bridge/
 | `src/IHasher.sol` | Poseidon interface `poseidon(bytes32[2]) returns (bytes32)`. Prod uses circomlibjs bytecode, tests use a keccak mock. |
 | `src/MerkleTreeWithHistory.sol` | Depth 20 incremental Poseidon tree over BN254. Caches zero subtrees and filled subtrees for O(levels) inserts. Keeps a 30 entry rolling root history. Mirrors the latest root into the fixed storage slot `latestRoot` (slot 3) so the relayer proves one stable slot. |
 | `src/ShieldedVault.sol` | Locks a fixed `denomination`, inserts the caller `commitment` into the tree, emits `Deposit(commitment, leafIndex, timestamp)`. No recipient recorded. Native or ERC20. |
-| `src/mocks/MockERC20.sol` | Freely mintable test token. |
+| `src/mocks/MockERC20.sol` | Freely mintable ERC20 with configurable decimals, used as a local 6 decimal USDC stand-in. Not deployed on testnet (real USDC is used). |
 | `src/mocks/MockHasher.sol` | Keccak based `IHasher` for Foundry logic tests. |
-| `script/DeploySource.s.sol` | Deploys `ShieldedVault` against a pre deployed hasher. `TOKEN_ADDRESS=0x0` selects a native-coin vault (used on testnet to save gas); unset deploys a MockERC20. |
+| `script/DeploySource.s.sol` | Deploys `ShieldedVault` against a pre deployed hasher. `TOKEN_ADDRESS=<usdc>` wires the real token (testnet); the sentinel `0xffff...ffff` deploys the local 6 decimal USDC mock; `0x0` selects a native-coin vault. |
 | `test/ShieldedVault.t.sol` | Deposit, multi deposit, duplicate revert, native vault, value checks. |
 
 ## contracts-qie (QIE testnet)
@@ -140,10 +139,12 @@ veil-bridge/
 
 | Path | Responsibility |
 |------|----------------|
-| `app/` | App Router pages: landing, deposit, claim, docs. |
+| `app/` | App Router pages: landing, deposit, claim, docs. Deposit creates a batch of N identical 0.01 USDC notes; claim is recipient-based and gasless. |
+| `app/api/relay/route.ts` | Server route: reads the latest vault root and submits it to `BridgeUpdater` on QIE with a server-only `RELAYER_PRIVATE_KEY`. Idempotent. |
+| `app/api/claim/route.ts` | Server route: forwards a browser-generated Groth16 proof to `ShieldedPool.withdraw`, paying QIE gas from the relayer key. The proof binds the recipient, so funds cannot be redirected; the claim wallet needs no QIE coin. |
 | `app/docs/` | Designed in-app documentation (testnet walkthrough, privacy model, architecture diagram). Authored as React, not rendered markdown. |
-| `components/` | UI primitives. `ConnectButton` does multi-wallet EIP-6963 discovery (connect modal + account dropdown); `NetworkGuard` switches/adds the required chain; `Modal` is a portal-based themed dialog used for deposit/claim success. |
-| `lib/bridgeStore.tsx` | `BridgeProvider` context holding the deposit and claim flow state, mounted above the router so switching tabs preserves progress, the generated note, and results. |
+| `components/` | UI primitives. `ConnectButton` does multi-wallet EIP-6963 discovery (connect modal + account dropdown); `NetworkGuard` switches/adds the required chain (deposit only); `Modal` is a portal-based themed dialog used for deposit/claim success. |
+| `lib/bridgeStore.tsx` | `BridgeProvider` context holding the deposit (`notes[]`) and claim flow state, mounted above the router so switching tabs preserves progress, the generated notes, and results. |
 | `lib/` | viem and wagmi config (multi-injected discovery on), chains (Sepolia, QIE 1983), Poseidon (promise-cached), Merkle tree, snarkjs proving in browser (dynamic import), contract ABIs and addresses. Colors follow the QIE logo palette. |
 | `public/circuits/` | `withdraw.wasm` and `withdraw_final.zkey` served to the browser for client side proving. |
 
@@ -153,5 +154,9 @@ veil-bridge/
    `BridgeUpdater`. Trust reduces to source block header authenticity. See
    [docs/TRUST_MODEL.md](docs/TRUST_MODEL.md).
 2. Claimer cannot double spend: `nullifierHash` is recorded on first claim.
-3. Privacy: deposit stores only a commitment, claim runs from a fresh wallet and
-   reveals only an unlinkable nullifier hash.
+3. Privacy: deposit stores only a commitment, the claim reveals only an
+   unlinkable nullifier hash, and gasless claims mean the recipient address has
+   no funding trail linking it to the depositor.
+4. Gasless relayer cannot steal: `recipient`, `relayer`, and `fee` are public
+   inputs bound into the Groth16 proof, so the server can only mint to the
+   recipient the prover chose.

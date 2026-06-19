@@ -43,7 +43,7 @@ contract WithdrawProofTest is Test {
         sp1 = new SP1MockVerifier();
         updater = new BridgeUpdater(sp1, VKEY, SOURCE_VAULT, owner);
         verifier = new WithdrawVerifier();
-        wrapped = new WrappedToken("Wrapped mUSD", "wmUSD", owner);
+        wrapped = new WrappedToken("Wrapped USDC", "wUSDC", 6, owner);
         pool = new ShieldedPool(IWithdrawVerifier(address(verifier)), updater, wrapped, DENOM);
 
         vm.prank(owner);

@@ -29,7 +29,7 @@ contract BridgeTest is Test {
         updater = new BridgeUpdater(sp1, VKEY, SOURCE_VAULT, owner);
 
         withdrawVerifier = new MockWithdrawVerifier();
-        wrapped = new WrappedToken("Wrapped mUSD", "wmUSD", owner);
+        wrapped = new WrappedToken("Wrapped USDC", "wUSDC", 6, owner);
         pool = new ShieldedPool(withdrawVerifier, updater, wrapped, DENOM);
 
         vm.prank(owner);

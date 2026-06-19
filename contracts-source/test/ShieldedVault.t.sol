@@ -21,7 +21,7 @@ contract ShieldedVaultTest is Test {
 
     function setUp() public {
         hasher = new MockHasher();
-        token = new MockERC20();
+        token = new MockERC20("USD Coin", "USDC", 6);
         vault = new ShieldedVault(LEVELS, hasher, address(token), DENOM);
 
         token.mint(alice, 10 ether);

@@ -15,16 +15,21 @@ set -a; . ./.env; set +a
 : "${VAULT_ADDRESS:?run deploy_testnet.sh first}"
 : "${POOL_ADDRESS:?run deploy_testnet.sh first}"
 START_BLOCK="${VAULT_DEPLOY_BLOCK:-0}"
+DEPOSITOR_ADDRESS="${DEPOSITOR_ADDRESS:-$(cast wallet address --private-key "$DEPOSITOR_PRIVATE_KEY")}"
 
-DENOM="${DENOMINATION:-1000000000000000000}"
+DENOM="${DENOMINATION:-10000}"   # 0.01 USDC
 TOKEN="${TOKEN_ADDRESS:-0x0000000000000000000000000000000000000000}"
+
+# Real USDC cannot be minted; the DEPOSITOR must already hold >= DENOM USDC.
 if [ "$TOKEN" != "0x0000000000000000000000000000000000000000" ]; then
-  echo "==> [0/4] Minting test tokens to MAIN ($(cast to-unit $DENOM ether) mUSD)"
-  cast send "$TOKEN" "mint(address,uint256)" "$MAIN_ADDRESS" "$DENOM" \
-    --rpc-url "$SOURCE_RPC_URL" --private-key "$DEPOSITOR_PRIVATE_KEY" >/dev/null
+  BAL_USDC=$(cast call "$TOKEN" "balanceOf(address)(uint256)" "$DEPOSITOR_ADDRESS" --rpc-url "$SOURCE_RPC_URL" | awk '{print $1}')
+  echo "==> [0/4] Depositor USDC balance: $BAL_USDC (need >= $DENOM)"
+  if [ "$(python3 -c "print(1 if int('$BAL_USDC') < int('$DENOM') else 0)")" = "1" ]; then
+    echo "FATAL: depositor holds too little USDC. Fund $DEPOSITOR_ADDRESS from https://faucet.circle.com"; exit 1
+  fi
 fi
 
-echo "==> [1/4] Depositing on Sepolia (MAIN)"
+echo "==> [1/4] Depositing on Sepolia (DEPOSITOR)"
 DEP_OUT=$(cd client && SOURCE_RPC_URL=$SOURCE_RPC_URL DEPOSITOR_PRIVATE_KEY=$DEPOSITOR_PRIVATE_KEY \
   VAULT_ADDRESS=$VAULT_ADDRESS npx tsx src/deposit.ts)
 echo "$DEP_OUT"
@@ -44,14 +49,18 @@ ACCEPTED=$(cast call "$UPDATER_ADDRESS" "isAcceptedRoot(bytes32)(bool)" "$VAULT_
 echo "    updater.isAcceptedRoot(vaultRoot) = $ACCEPTED"
 [ "$ACCEPTED" = "true" ] || { echo "FAIL: root not bridged to QIE"; exit 1; }
 
-echo "==> [3/4] Claiming on QIE from CLAIMER (real Groth16 proof)"
-(cd client && SOURCE_RPC_URL=$SOURCE_RPC_URL QIE_RPC_URL=$QIE_RPC_URL CLAIMER_PRIVATE_KEY=$CLAIMER_PRIVATE_KEY \
-  VAULT_ADDRESS=$VAULT_ADDRESS POOL_ADDRESS=$POOL_ADDRESS START_BLOCK=$START_BLOCK NOTE="$NOTE" \
-  npx tsx src/claim.ts)
+echo "==> [3/4] Gasless claim on QIE (relayer signs + pays gas, recipient = CLAIMER)"
+# The proof binds recipient = CLAIMER_ADDRESS, while the RELAYER key signs and
+# pays QIE gas. The claim wallet therefore needs no QIE coin.
+PRE_BAL=$(cast call "$WRAPPED_ADDRESS" "balanceOf(address)(uint256)" "$CLAIMER_ADDRESS" --rpc-url "$QIE_RPC_URL" | awk '{print $1}')
+(cd client && SOURCE_RPC_URL=$SOURCE_RPC_URL QIE_RPC_URL=$QIE_RPC_URL CLAIMER_PRIVATE_KEY=$RELAYER_PRIVATE_KEY \
+  RECIPIENT=$CLAIMER_ADDRESS VAULT_ADDRESS=$VAULT_ADDRESS POOL_ADDRESS=$POOL_ADDRESS \
+  START_BLOCK=$START_BLOCK NOTE="$NOTE" npx tsx src/claim.ts)
 
 echo "==> [4/4] Verifying wrapped-token balance on QIE"
-BAL=$(cast call "$WRAPPED_ADDRESS" "balanceOf(address)(uint256)" "$CLAIMER_ADDRESS" --rpc-url "$QIE_RPC_URL")
-echo "    CLAIMER wrapped balance = $BAL"
-echo "$BAL" | grep -q "^${DENOMINATION:-1000000000000000000}" \
+BAL=$(cast call "$WRAPPED_ADDRESS" "balanceOf(address)(uint256)" "$CLAIMER_ADDRESS" --rpc-url "$QIE_RPC_URL" | awk '{print $1}')
+echo "    CLAIMER wrapped balance: $PRE_BAL -> $BAL (expected +$DENOM)"
+GAINED=$(python3 -c "print(int('$BAL') - int('$PRE_BAL'))")
+[ "$GAINED" = "$DENOM" ] \
   && echo "SUCCESS: live testnet shielded bridge worked end-to-end!" \
-  || { echo "FAIL: unexpected balance"; exit 1; }
+  || { echo "FAIL: unexpected balance delta ($GAINED)"; exit 1; }

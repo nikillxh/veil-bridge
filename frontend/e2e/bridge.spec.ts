@@ -1,5 +1,17 @@
 import { test, expect, type Page } from "@playwright/test";
+import { privateKeyToAccount } from "viem/accounts";
+import type { Hex } from "viem";
 import { createWalletBackend } from "./wallet";
+
+function pk(name: string): Hex {
+  const v = process.env[name];
+  if (!v) throw new Error(`missing ${name}`);
+  return (v.startsWith("0x") ? v : `0x${v}`) as Hex;
+}
+
+// Recipient for the gasless claim: a fresh QIE address with no link to the
+// depositor. The server relayer pays the gas; this wallet just receives funds.
+const RECIPIENT = privateKeyToAccount(pk("CLAIMER_PRIVATE_KEY")).address;
 
 // Browser-side EIP-1193 shim. Proxies every request to the Node backend
 // (window.__walletRequest) and emits chain/account change events on switch.
@@ -81,9 +93,10 @@ test("deposit then shielded claim through the UI", async ({ page }) => {
   await page.goto("/deposit");
   await connect(page);
 
-  await expect(page.getByText(/Deposit amount/i)).toBeVisible();
+  await expect(page.getByText(/Amount per note/i)).toBeVisible();
   await expect(page.getByText("Fixed denomination", { exact: true })).toBeVisible();
 
+  // Default count is 1: deposit a single 0.01 USDC note.
   await page.getByRole("button", { name: /Generate note and deposit/i }).click();
 
   const dialog = page.getByRole("dialog");
@@ -91,19 +104,19 @@ test("deposit then shielded claim through the UI", async ({ page }) => {
 
   const note = (await page.locator("code", { hasText: "qie-note-v1:" }).first().textContent())?.trim();
   expect(note, "secret note should be shown").toBeTruthy();
+  await dialog.getByRole("button", { name: /Download/i }).first().isVisible().catch(() => {});
+  await page.keyboard.press("Escape").catch(() => {});
 
-  // --- Claim on QIE ---
+  // --- Gasless claim on QIE (no network switch; relayer pays gas) ---
   await page.goto("/claim");
-  const switchBtn = page.getByRole("button", { name: /Switch to QIE/i });
   const textarea = page.locator("textarea");
-  // Either the network guard (need to switch to QIE) or the claim form shows.
-  await expect(switchBtn.or(textarea).first()).toBeVisible({ timeout: 30_000 });
-  if (await switchBtn.isVisible().catch(() => false)) {
-    await switchBtn.click();
-    await expect(textarea).toBeVisible({ timeout: 30_000 });
-  }
-
+  await expect(textarea).toBeVisible({ timeout: 30_000 });
   await textarea.fill(note!);
+
+  const recipientField = page.getByPlaceholder(/wrapped USDC is minted/i);
+  await expect(recipientField).toBeVisible({ timeout: 10_000 });
+  await recipientField.fill(RECIPIENT);
+
   await page.getByRole("button", { name: /Generate proof and claim/i }).click();
 
   await expect(page.getByRole("dialog").getByText(/Claim complete/i)).toBeVisible({

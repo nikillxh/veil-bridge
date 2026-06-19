@@ -37,7 +37,7 @@ contract DeployQie is Script {
         }
 
         WithdrawVerifier verifier = new WithdrawVerifier();
-        WrappedToken wrapped = new WrappedToken("Wrapped Bridged Asset", "wBRG", deployer);
+        WrappedToken wrapped = new WrappedToken("Wrapped USDC", "wUSDC", 6, deployer);
         BridgeUpdater updater =
             new BridgeUpdater(ISP1Verifier(sp1), vkey, sourceVault, deployer);
         ShieldedPool pool = new ShieldedPool(

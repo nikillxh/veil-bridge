@@ -22,10 +22,12 @@ cd "$ROOT_DIR"
 set -a; . ./.env; set +a
 
 VERCEL_PROJECT="${VERCEL_PROJECT:-veil-bridge}"
-# Testnet uses a free-mint ERC20 test token (mUSD) so visitors can try the live
-# site without holding a specific asset. LEVELS must stay 20 to match the
-# compiled circuit + trusted setup; do not change it without recompiling.
-DENOM="${DENOMINATION:-1000000000000000000}"   # 1 mUSD
+# Testnet bridges real Sepolia USDC (6 decimals). The per-note denomination is
+# fixed at 0.01 USDC = 10000 base units; users pick how many identical notes to
+# create. LEVELS must stay 20 to match the compiled circuit + trusted setup; do
+# not change it without recompiling.
+USDC="${USDC:-0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238}"   # Sepolia USDC
+DENOM="${DENOMINATION:-10000}"   # 0.01 USDC
 LEVELS="${LEVELS:-20}"
 
 set_env_var() { # key value  -> upsert into ./.env
@@ -48,8 +50,9 @@ if [ "${SKIP_CONTRACTS:-0}" != "1" ]; then
   # +25% inclusion buffer (still far below EIP-1559's ~2x maxFee reserve).
   GP=$(python3 -c "print(int(int($GP_RAW)*5//4))")
   BAL=$(cast balance "$MAIN_ADDRESS" --rpc-url "$SOURCE_RPC_URL")
-  # ~2.2M poseidon (skipped if reused) + ~2.05M (test token + vault) + ~0.25M deposit.
-  EST_GAS=2300000
+  # ~1.6M for the vault only (no token deploy: real USDC is used).
+  # +2.2M poseidon if it has not been deployed/reused yet.
+  EST_GAS=1600000
   [ -z "$HASHER" ] && EST_GAS=$((EST_GAS + 2200000))
   NEED=$(python3 -c "print(int($GP)*$EST_GAS)")
   echo "==> Gas precheck (Sepolia): price=$(cast to-unit $GP gwei) gwei, est_gas=$EST_GAS"
@@ -71,15 +74,16 @@ if [ "${SKIP_CONTRACTS:-0}" != "1" ]; then
 
   SRC_DEPLOY_BLOCK=$(cast block-number --rpc-url "$SOURCE_RPC_URL")
 
-  echo "==> [2/5] Deploying test token + ShieldedVault (denom $(cast to-unit $DENOM ether) mUSD) on Sepolia"
+  echo "==> [2/5] Deploying ShieldedVault for USDC $USDC (per-note 0.01 USDC) on Sepolia"
+  # TOKEN_ADDRESS=USDC makes DeploySource skip the mock and wire the real token.
   SRC_OUT=$(cd contracts-source && HASHER_ADDRESS=$HASHER DENOMINATION=$DENOM LEVELS=$LEVELS \
+    TOKEN_ADDRESS=$USDC \
     forge script script/DeploySource.s.sol --rpc-url "$SOURCE_RPC_URL" \
     --private-key "$DEPLOYER_PRIVATE_KEY" --broadcast --slow --legacy --gas-price "$GP" 2>&1)
   VAULT=$(echo "$SRC_OUT" | grep "ShieldedVault:" | awk '{print $NF}')
-  TOKEN=$(echo "$SRC_OUT" | grep "MockERC20:" | awk '{print $NF}')
+  TOKEN=$USDC
   echo "    vault=$VAULT token=$TOKEN block=$SRC_DEPLOY_BLOCK"
   [ -n "$VAULT" ] || { echo "FATAL: vault deploy failed"; echo "$SRC_OUT" | tail -30; exit 1; }
-  [ -n "$TOKEN" ] || { echo "FATAL: test token deploy failed"; echo "$SRC_OUT" | tail -30; exit 1; }
 
   echo "==> [3/5] Deploying QIE contracts (updater + pool + wrapped + verifier)"
   QIE_OUT=$(cd contracts-qie && SOURCE_VAULT=$VAULT DENOMINATION=$DENOM \

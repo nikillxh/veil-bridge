@@ -21,7 +21,7 @@ SRC_RPC=http://127.0.0.1:8545
 QIE_RPC=http://127.0.0.1:8546
 SRC_CHAIN_ID=11155111
 QIE_CHAIN_ID=1983
-DENOM=1000000000000000000
+DENOM=10000           # 0.01 USDC (6 decimals); per-note fixed denomination
 LEVELS=20
 
 # anvil default account #0 (deployer + relayer). Import this into your wallet.
@@ -53,11 +53,14 @@ echo "    hasher=$HASHER"
 
 SRC_DEPLOY_BLOCK=$(cast block-number --rpc-url $SRC_RPC)
 
-echo "==> Deploying source contracts (vault + test token)"
+echo "==> Deploying source contracts (vault + local USDC mock)"
+# Sentinel TOKEN_ADDRESS forces a fresh 6-decimal USDC mock and overrides any
+# stale TOKEN_ADDRESS auto-loaded from ./.env by Foundry.
 SRC_OUT=$(cd "$ROOT_DIR/contracts-source" && HASHER_ADDRESS=$HASHER DENOMINATION=$DENOM LEVELS=$LEVELS \
+  TOKEN_ADDRESS=0xffffffffffffffffffffffffffffffffffffffff \
   forge script script/DeploySource.s.sol --rpc-url $SRC_RPC --private-key $KEY --broadcast 2>&1)
 VAULT=$(echo "$SRC_OUT" | grep "ShieldedVault:" | awk '{print $NF}')
-TOKEN=$(echo "$SRC_OUT" | grep "MockERC20:" | awk '{print $NF}')
+TOKEN=$(echo "$SRC_OUT" | grep -E "^\s*token:" | awk '{print $NF}')
 echo "    vault=$VAULT token=$TOKEN"
 
 echo "==> Deploying QIE contracts (updater + pool + wrapped + verifier)"
@@ -79,6 +82,12 @@ NEXT_PUBLIC_POOL_ADDRESS=$POOL
 NEXT_PUBLIC_WRAPPED_ADDRESS=$WRAPPED
 NEXT_PUBLIC_MERKLE_LEVELS=$LEVELS
 NEXT_PUBLIC_VAULT_DEPLOY_BLOCK=$SRC_DEPLOY_BLOCK
+# Local USDC stand-in is freely mintable; the deposit page auto-mints.
+NEXT_PUBLIC_TOKEN_MINTABLE=1
+# Server-only (no NEXT_PUBLIC): power /api/relay + /api/claim under next dev.
+RELAYER_PRIVATE_KEY=$KEY
+SEPOLIA_RPC_URL=$SRC_RPC
+QIE_RPC_URL=$QIE_RPC
 EOF
 
 echo "==> Starting relayer loop (bridges vault roots 8545 -> 8546)"

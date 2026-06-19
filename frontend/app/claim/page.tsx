@@ -1,8 +1,8 @@
 "use client";
 
-import { useAccount, usePublicClient, useWriteContract } from "wagmi";
-import { createPublicClient, http, zeroAddress } from "viem";
-import { NetworkGuard } from "@/components/NetworkGuard";
+import { useEffect, useState } from "react";
+import { useAccount, usePublicClient } from "wagmi";
+import { createPublicClient, formatUnits, http, isAddress, zeroAddress } from "viem";
 import { Stepper, type Step } from "@/components/Stepper";
 import { ConfigWarning } from "@/components/ConfigWarning";
 import { Modal } from "@/components/Modal";
@@ -22,13 +22,12 @@ export default function ClaimPage() {
       <header className="space-y-2">
         <h1 className="text-3xl font-semibold tracking-tight text-white">Shielded claim</h1>
         <p className="max-w-2xl text-slate-400">
-          Paste your note and claim wrapped tokens on {QIE_CHAIN.name}. Use a fresh wallet with no
-          link to the depositor. The proof is generated entirely in your browser.
+          Paste your note and claim wrapped USDC on {QIE_CHAIN.name}. The proof is generated
+          entirely in your browser, and the claim is submitted gaslessly by the relayer, so the
+          recipient wallet needs no QIE coin and no link to the depositor.
         </p>
       </header>
-      <NetworkGuard chainId={QIE_CHAIN.id} chainName={QIE_CHAIN.name}>
-        <ClaimFlow />
-      </NetworkGuard>
+      <ClaimFlow />
     </div>
   );
 }
@@ -36,12 +35,42 @@ export default function ClaimPage() {
 function ClaimFlow() {
   const { address } = useAccount();
   const qieClient = usePublicClient({ chainId: QIE_CHAIN.id });
-  const { writeContractAsync } = useWriteContract();
 
   const { claim: state, setClaim } = useBridge();
   const { noteInput, busy, error, steps, done } = state;
 
   const configured = ADDRESSES.pool !== zeroAddress && ADDRESSES.vault !== zeroAddress;
+
+  const [recipient, setRecipient] = useState("");
+  const [denomLabel, setDenomLabel] = useState<string | null>(null);
+
+  // Prefill the recipient with the connected wallet (if any). The user can paste
+  // any QIE address; no QIE coin is needed because the relayer pays the gas.
+  useEffect(() => {
+    if (address && !recipient) setRecipient(address);
+  }, [address, recipient]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      if (!qieClient || !configured) return;
+      try {
+        const denom = (await qieClient.readContract({
+          address: ADDRESSES.pool,
+          abi: POOL_ABI,
+          functionName: "denomination",
+        })) as bigint;
+        // Wrapped USDC mirrors USDC at 6 decimals.
+        if (!cancelled) setDenomLabel(`${formatUnits(denom, 6)} wUSDC`);
+      } catch {
+        if (!cancelled) setDenomLabel(null);
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [qieClient, configured]);
 
   function patch(i: number, s: Partial<Step>) {
     setClaim((c) => ({
@@ -51,7 +80,13 @@ function ClaimFlow() {
   }
 
   async function run() {
-    if (!qieClient || !address) return;
+    if (!qieClient) return;
+    if (!isAddress(recipient)) {
+      setClaim((c) => ({ ...c, error: "Enter a valid recipient address for the QIE side." }));
+      return;
+    }
+    const recipientAddr = recipient as `0x${string}`;
+
     setClaim((c) => ({
       ...c,
       busy: true,
@@ -63,7 +98,7 @@ function ClaimFlow() {
         { label: "Rebuild Merkle tree from deposits", state: "idle" },
         { label: "Check root is bridged to QIE", state: "idle" },
         { label: "Generate zero knowledge proof", state: "idle" },
-        { label: "Submit claim", state: "idle" },
+        { label: "Submit gasless claim", state: "idle" },
       ],
     }));
 
@@ -143,10 +178,11 @@ function ClaimFlow() {
       }
       patch(2, { state: "done", detail: rootHex });
 
-      // Prove membership client side.
+      // Prove membership client side, binding the chosen recipient + a gasless
+      // (relayer=0, fee=0) configuration into the public inputs.
       patch(3, { state: "active" });
       const input = buildWitnessInput(note, merkle, {
-        recipient: BigInt(address),
+        recipient: BigInt(recipientAddr),
         relayer: 0n,
         fee: 0n,
         refund: 0n,
@@ -154,33 +190,32 @@ function ClaimFlow() {
       const proof = await generateProof(input);
       patch(3, { state: "done" });
 
-      // Submit the withdraw on QIE.
+      // Submit the withdraw via the gasless relay endpoint (server pays QIE gas).
       patch(4, { state: "active" });
-      const hash = await writeContractAsync({
-        address: ADDRESSES.pool,
-        abi: POOL_ABI,
-        functionName: "withdraw",
-        args: [
-          proof.pA,
-          proof.pB,
-          proof.pC,
-          rootHex,
-          toBytes32(note.nullifierHash),
-          address,
-          zeroAddress,
-          0n,
-          0n,
-        ],
-        // QIE's gas estimation under-reports for proof-verifying calls; set an
-        // explicit, generous limit so the withdraw cannot run out of gas.
-        gas: 1_500_000n,
+      const res = await fetch("/api/claim", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          pA: [proof.pA[0].toString(), proof.pA[1].toString()],
+          pB: [
+            [proof.pB[0][0].toString(), proof.pB[0][1].toString()],
+            [proof.pB[1][0].toString(), proof.pB[1][1].toString()],
+          ],
+          pC: [proof.pC[0].toString(), proof.pC[1].toString()],
+          root: rootHex,
+          nullifierHash: toBytes32(note.nullifierHash),
+          recipient: recipientAddr,
+          relayer: zeroAddress,
+          fee: "0",
+          refund: "0",
+        }),
       });
-      const receipt = await qieClient.waitForTransactionReceipt({ hash });
-      if (receipt.status !== "success") {
-        throw new Error("Claim transaction reverted on QIE.");
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) {
+        throw new Error(data?.error ?? "Claim submission failed.");
       }
       patch(4, { state: "done" });
-      setClaim((c) => ({ ...c, done: hash, showSuccess: true }));
+      setClaim((c) => ({ ...c, done: data.tx, showSuccess: true }));
     } catch (e: any) {
       const msg = e?.shortMessage ?? e?.message ?? "Claim failed";
       setClaim((c) => ({
@@ -194,6 +229,8 @@ function ClaimFlow() {
   }
 
   if (!configured) return <ConfigWarning what="pool or vault" />;
+
+  const recipientValid = isAddress(recipient);
 
   return (
     <>
@@ -217,16 +254,37 @@ function ClaimFlow() {
               onChange={async (e) => {
                 const f = e.target.files?.[0];
                 if (f) {
-                  const text = (await f.text()).trim();
+                  // A file may hold multiple notes (one per line); claim the first.
+                  const text = (await f.text()).trim().split(/\r?\n/)[0].trim();
                   setClaim((c) => ({ ...c, noteInput: text }));
                 }
               }}
             />
           </label>
-          <button onClick={run} disabled={busy || !noteInput} className="btn-primary flex-1 py-3">
-            {busy ? "Claiming" : "Generate proof and claim"}
-          </button>
         </div>
+
+        <div className="space-y-2">
+          <label className="label">Recipient address on {QIE_CHAIN.name}</label>
+          <input
+            value={recipient}
+            onChange={(e) => setRecipient(e.target.value)}
+            placeholder="0x... (where wrapped USDC is minted)"
+            className="field font-mono"
+          />
+          <p className="text-xs text-slate-500">
+            {denomLabel ? `Receives ${denomLabel}. ` : ""}
+            Use a fresh address with no link to the depositor. No QIE coin needed: the relayer pays
+            the gas.
+          </p>
+        </div>
+
+        <button
+          onClick={run}
+          disabled={busy || !noteInput || !recipientValid}
+          className="btn-primary w-full py-3"
+        >
+          {busy ? "Claiming" : "Generate proof and claim"}
+        </button>
         {error ? (
           <div className="rounded-xl border border-rose-400/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
             {error}
@@ -253,7 +311,7 @@ function ClaimFlow() {
         ) : (
           <div className="glass flex h-full flex-col justify-center gap-3 p-6 text-sm text-slate-500">
             <p>Proving happens locally in your browser using the circuit wasm and proving key.</p>
-            <p>Expect a few seconds for proof generation.</p>
+            <p>Expect a few seconds for proof generation, then a gasless on-chain claim.</p>
           </div>
         )}
       </div>
@@ -271,7 +329,9 @@ function ClaimFlow() {
             <path d="M5 10.5l3.5 3.5L15 6.5" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </span>
-        <p className="text-sm text-emerald-100">Wrapped tokens minted to your wallet.</p>
+        <p className="text-sm text-emerald-100">
+          {denomLabel ? `${denomLabel} minted to the recipient.` : "Wrapped USDC minted to the recipient."}
+        </p>
       </div>
       {done ? (
         <a

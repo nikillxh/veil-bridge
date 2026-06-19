@@ -3,9 +3,18 @@ pragma solidity ^0.8.24;
 
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
-/// @notice Freely-mintable ERC20 used as a test asset for local and testnet runs.
+/// @notice Freely-mintable ERC20 used as a local stand-in for USDC. The decimals
+///         are configurable so the local token matches real USDC (6 decimals).
 contract MockERC20 is ERC20 {
-    constructor() ERC20("Mock USD", "mUSD") {}
+    uint8 private immutable _decimals;
+
+    constructor(string memory name_, string memory symbol_, uint8 decimals_) ERC20(name_, symbol_) {
+        _decimals = decimals_;
+    }
+
+    function decimals() public view override returns (uint8) {
+        return _decimals;
+    }
 
     function mint(address to, uint256 amount) external {
         _mint(to, amount);

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useAccount, usePublicClient, useWriteContract } from "wagmi";
-import { formatEther, formatUnits, zeroAddress } from "viem";
+import { formatUnits, zeroAddress } from "viem";
 import { NetworkGuard } from "@/components/NetworkGuard";
 import { Stepper, type Step } from "@/components/Stepper";
 import { CopyField } from "@/components/CopyField";
@@ -14,14 +14,21 @@ import { createNote, serializeNote, type Note } from "@/lib/note";
 import { toBytes32 } from "@/lib/poseidon";
 import { useBridge } from "@/lib/bridgeStore";
 
+// Local runs deploy a freely-mintable USDC stand-in; on testnet this is unset so
+// the user funds from a faucet instead.
+const MINTABLE = process.env.NEXT_PUBLIC_TOKEN_MINTABLE === "1";
+const MAX_NOTES = 10;
+const FAUCET_URL = "https://faucet.circle.com";
+
 export default function DepositPage() {
   return (
     <div className="space-y-8">
       <header className="space-y-2">
         <h1 className="text-3xl font-semibold tracking-tight text-white">Private deposit</h1>
         <p className="max-w-2xl text-slate-400">
-          Lock the fixed denomination on {SOURCE_CHAIN.name} behind a fresh commitment. Save the
-          note that appears: it is the only way to claim, and it must stay secret.
+          Lock USDC on {SOURCE_CHAIN.name} behind fresh commitments. Each note is an identical
+          fixed amount, so every deposit looks the same and the anonymity set stays strong. Choose
+          how many notes to create. Save every note that appears: each is the only way to claim.
         </p>
       </header>
       <NetworkGuard chainId={SOURCE_CHAIN.id} chainName={SOURCE_CHAIN.name}>
@@ -37,10 +44,11 @@ function DepositFlow() {
   const { writeContractAsync } = useWriteContract();
 
   const { deposit: state, setDeposit } = useBridge();
-  const { busy, note, error, steps, txHash } = state;
+  const { busy, notes, error, steps, txHash } = state;
 
   const configured = ADDRESSES.vault !== zeroAddress;
 
+  const [count, setCount] = useState(1);
   const [info, setInfo] = useState<{
     symbol: string;
     decimals: number;
@@ -87,41 +95,35 @@ function DepositFlow() {
     return () => {
       cancelled = true;
     };
-  }, [publicClient, address, configured]);
+  }, [publicClient, address, configured, txHash]);
 
-  function setSteps(updater: (prev: Step[]) => Step[]) {
-    setDeposit((s) => ({ ...s, steps: updater(s.steps) }));
-  }
   function patch(i: number, s: Partial<Step>) {
-    setSteps((prev) => prev.map((p, idx) => (idx === i ? { ...p, ...s } : p)));
+    setDeposit((prev) => ({
+      ...prev,
+      steps: prev.steps.map((p, idx) => (idx === i ? { ...p, ...s } : p)),
+    }));
   }
 
   async function run() {
     if (!publicClient || !address) return;
+    const n = Math.min(Math.max(count, 1), MAX_NOTES);
     setDeposit((s) => ({
       ...s,
       busy: true,
       error: null,
-      note: null,
+      notes: [],
       txHash: null,
       showSuccess: false,
-      steps: [{ label: "Generate commitment", state: "active" }],
+      steps: [],
     }));
 
     try {
-      const fresh = await createNote();
-      const commitment = toBytes32(fresh.commitment);
-
       let token: `0x${string}`;
       let denom: bigint;
       try {
         [token, denom] = (await Promise.all([
           publicClient.readContract({ address: ADDRESSES.vault, abi: VAULT_ABI, functionName: "token" }),
-          publicClient.readContract({
-            address: ADDRESSES.vault,
-            abi: VAULT_ABI,
-            functionName: "denomination",
-          }),
+          publicClient.readContract({ address: ADDRESSES.vault, abi: VAULT_ABI, functionName: "denomination" }),
         ])) as [`0x${string}`, bigint];
       } catch {
         throw new Error(
@@ -129,64 +131,85 @@ function DepositFlow() {
         );
       }
       const isErc20 = token !== zeroAddress;
+      const decimals = info?.decimals ?? 18;
+      const symbol = info?.symbol ?? "tokens";
+      const total = denom * BigInt(n);
+      const fmt = (v: bigint) => `${formatUnits(v, decimals)} ${symbol}`;
 
-      const flow: Step[] = [
-        { label: "Generate commitment", state: "done", detail: commitment },
-        ...(isErc20
-          ? ([
-              { label: "Mint test tokens", state: "idle" },
-              { label: "Approve vault", state: "idle" },
-            ] as Step[])
-          : []),
-        { label: `Deposit ${formatEther(denom)} to vault`, state: "idle" },
-        { label: "Bridge root to QIE", state: "idle" },
-      ];
-      setDeposit((s) => ({ ...s, steps: flow }));
-
-      let cursor = 1;
+      let balance = 0n;
       if (isErc20) {
-        const bal = (await publicClient.readContract({
+        balance = (await publicClient.readContract({
           address: token,
           abi: ERC20_ABI,
           functionName: "balanceOf",
           args: [address],
         })) as bigint;
-        if (bal < denom) {
-          patch(cursor, { state: "active" });
-          const h = await writeContractAsync({
-            address: token,
-            abi: ERC20_ABI,
-            functionName: "mint",
-            args: [address, denom],
-          });
-          await publicClient.waitForTransactionReceipt({ hash: h });
+      } else {
+        balance = await publicClient.getBalance({ address });
+      }
+      const needFunds = balance < total;
+
+      const flow: Step[] = [];
+      if (isErc20 && needFunds && MINTABLE) flow.push({ label: `Mint ${fmt(total)}`, state: "idle" });
+      if (isErc20) flow.push({ label: `Approve ${fmt(total)}`, state: "idle" });
+      for (let i = 0; i < n; i++) {
+        flow.push({ label: `Deposit note ${i + 1} of ${n} (${fmt(denom)})`, state: "idle" });
+      }
+      flow.push({ label: "Bridge root to QIE", state: "idle" });
+      setDeposit((s) => ({ ...s, steps: flow }));
+
+      let cursor = 0;
+
+      if (isErc20 && needFunds) {
+        if (!MINTABLE) {
+          throw new Error(
+            `You need ${fmt(total)} but hold ${fmt(balance)}. Get testnet USDC from the Circle faucet (${FAUCET_URL}), then retry.`,
+          );
         }
+        patch(cursor, { state: "active" });
+        const mh = await writeContractAsync({
+          address: token,
+          abi: ERC20_ABI,
+          functionName: "mint",
+          args: [address, total - balance],
+        });
+        await publicClient.waitForTransactionReceipt({ hash: mh });
         patch(cursor, { state: "done" });
         cursor++;
+      }
 
+      if (isErc20) {
         patch(cursor, { state: "active" });
         const ah = await writeContractAsync({
           address: token,
           abi: ERC20_ABI,
           functionName: "approve",
-          args: [ADDRESSES.vault, denom],
+          args: [ADDRESSES.vault, total],
         });
         await publicClient.waitForTransactionReceipt({ hash: ah });
         patch(cursor, { state: "done" });
         cursor++;
       }
 
-      patch(cursor, { state: "active" });
-      const dh = await writeContractAsync({
-        address: ADDRESSES.vault,
-        abi: VAULT_ABI,
-        functionName: "deposit",
-        args: [commitment],
-        value: isErc20 ? 0n : denom,
-      });
-      await publicClient.waitForTransactionReceipt({ hash: dh });
-      patch(cursor, { state: "done" });
-      cursor++;
+      const collected: Note[] = [];
+      let lastTx: string | null = null;
+      for (let i = 0; i < n; i++) {
+        patch(cursor, { state: "active" });
+        const fresh = await createNote();
+        const commitment = toBytes32(fresh.commitment);
+        const dh = await writeContractAsync({
+          address: ADDRESSES.vault,
+          abi: VAULT_ABI,
+          functionName: "deposit",
+          args: [commitment],
+          value: isErc20 ? 0n : denom,
+        });
+        await publicClient.waitForTransactionReceipt({ hash: dh });
+        collected.push(fresh);
+        lastTx = dh;
+        patch(cursor, { state: "done", detail: commitment });
+        cursor++;
+      }
 
       // Bridge the new root to QIE so the claim side is ready immediately.
       patch(cursor, { state: "active" });
@@ -198,11 +221,10 @@ function DepositFlow() {
           detail: res.ok ? undefined : body?.error ?? "relay failed",
         });
       } catch {
-        // Non-fatal: the claim page also relays + retries.
         patch(cursor, { state: "error", detail: "Relay deferred; claim will retry." });
       }
 
-      setDeposit((s) => ({ ...s, txHash: dh, note: fresh, showSuccess: true }));
+      setDeposit((s) => ({ ...s, txHash: lastTx, notes: collected, showSuccess: true }));
     } catch (e: any) {
       const msg = e?.shortMessage ?? e?.message ?? "Transaction failed";
       setDeposit((s) => ({
@@ -219,6 +241,9 @@ function DepositFlow() {
     return <ConfigWarning what="vault" />;
   }
 
+  const perNote = info ? `${formatUnits(info.denom, info.decimals)} ${info.symbol}` : "...";
+  const total = info ? `${formatUnits(info.denom * BigInt(count), info.decimals)} ${info.symbol}` : "...";
+
   return (
     <>
     <div className="grid gap-6 lg:grid-cols-5">
@@ -228,34 +253,74 @@ function DepositFlow() {
           <span className="pill text-slate-400">{SOURCE_CHAIN.name}</span>
         </div>
         <p className="text-sm leading-relaxed text-slate-400">
-          A new random note is generated in your browser. The commitment is sent on chain; the
-          secret never leaves this device.
+          Fresh random notes are generated in your browser. The commitments are sent on chain; the
+          secrets never leave this device.
         </p>
 
-        <div className="rounded-xl border border-white/10 bg-ink-900/50 p-4">
+        <div className="rounded-xl border border-white/10 bg-ink-900/50 p-4 space-y-4">
           <div className="flex items-end justify-between">
             <div>
-              <p className="label">Deposit amount</p>
-              <p className="mt-1 text-2xl font-semibold text-white">
-                {info ? `${formatUnits(info.denom, info.decimals)} ${info.symbol}` : "..."}
-              </p>
+              <p className="label">Amount per note</p>
+              <p className="mt-1 text-2xl font-semibold text-white">{perNote}</p>
             </div>
             <span className="pill text-slate-400">Fixed denomination</span>
           </div>
-          <p className="mt-3 text-xs text-slate-500">
-            {info?.isErc20
-              ? "A fixed amount keeps every deposit identical, which is what gives the pool its anonymity set. Test tokens are minted to you automatically if your balance is low."
-              : "A fixed amount keeps every deposit identical, which is what gives the pool its anonymity set."}
-          </p>
+
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="label">Number of notes</p>
+              <p className="mt-1 text-xs text-slate-500">Each note is bridged and claimed separately.</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setCount((c) => Math.max(1, c - 1))}
+                disabled={busy || count <= 1}
+                className="btn-ghost h-9 w-9 p-0 text-lg"
+                aria-label="Fewer notes"
+              >
+                -
+              </button>
+              <span className="w-8 text-center font-mono text-lg text-white">{count}</span>
+              <button
+                type="button"
+                onClick={() => setCount((c) => Math.min(MAX_NOTES, c + 1))}
+                disabled={busy || count >= MAX_NOTES}
+                className="btn-ghost h-9 w-9 p-0 text-lg"
+                aria-label="More notes"
+              >
+                +
+              </button>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between border-t border-white/10 pt-3">
+            <p className="label">Total to deposit</p>
+            <p className="text-lg font-semibold text-white">{total}</p>
+          </div>
+
           {info && address ? (
-            <p className="mt-2 text-xs text-slate-500">
+            <p className="text-xs text-slate-500">
               Your balance: {formatUnits(info.balance, info.decimals)} {info.symbol}
+              {!MINTABLE ? (
+                <>
+                  {" - "}
+                  <a className="text-brand-400 hover:underline" href={FAUCET_URL} target="_blank" rel="noreferrer">
+                    get testnet USDC
+                  </a>
+                </>
+              ) : null}
+            </p>
+          ) : null}
+          {count > 1 ? (
+            <p className="text-xs text-slate-500">
+              Heads up: {count} notes means {count} separate on-chain deposits (more gas).
             </p>
           ) : null}
         </div>
 
         <button onClick={run} disabled={busy} className="btn-primary w-full py-3">
-          {busy ? "Working" : "Generate note and deposit"}
+          {busy ? "Working" : count > 1 ? `Generate ${count} notes and deposit` : "Generate note and deposit"}
         </button>
         {error ? (
           <div className="rounded-xl border border-rose-400/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
@@ -270,18 +335,29 @@ function DepositFlow() {
       </div>
 
       <div className="lg:col-span-2">
-        {note ? (
+        {notes.length > 0 ? (
           <div className="glass space-y-4 p-6">
             <div className="flex items-center gap-2">
               <span className="h-2 w-2 rounded-full bg-emerald-400" />
-              <h2 className="text-lg font-medium text-white">Deposit confirmed</h2>
+              <h2 className="text-lg font-medium text-white">
+                {notes.length === 1 ? "Deposit confirmed" : `${notes.length} deposits confirmed`}
+              </h2>
             </div>
             <div className="rounded-xl border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-sm text-amber-200">
-              Save this note now. Anyone with it can claim. Losing it means losing the funds.
+              Save {notes.length === 1 ? "this note" : "every note"} now. Anyone with a note can
+              claim it. Losing one means losing those funds.
             </div>
-            <CopyField label="Secret note" value={serializeNote(note)} />
-            <button onClick={() => downloadNote(note)} className="btn-ghost w-full">
-              Download note file
+            <div className="space-y-3">
+              {notes.map((n, i) => (
+                <CopyField
+                  key={i}
+                  label={notes.length === 1 ? "Secret note" : `Secret note ${i + 1}`}
+                  value={serializeNote(n)}
+                />
+              ))}
+            </div>
+            <button onClick={() => downloadNotes(notes)} className="btn-ghost w-full">
+              Download {notes.length === 1 ? "note file" : "all notes"}
             </button>
             {txHash ? (
               <a
@@ -290,46 +366,42 @@ function DepositFlow() {
                 rel="noreferrer"
                 className="block text-center text-xs text-brand-400 hover:underline"
               >
-                View deposit transaction
+                View last deposit transaction
               </a>
             ) : null}
           </div>
         ) : (
           <div className="glass flex h-full flex-col justify-center gap-3 p-6 text-sm text-slate-500">
-            <p>Your secret note will appear here after a successful deposit.</p>
-            <p>Keep it safe and claim later from a fresh wallet on QIE.</p>
+            <p>Your secret notes will appear here after a successful deposit.</p>
+            <p>Keep them safe and claim later from a fresh wallet on QIE.</p>
           </div>
         )}
       </div>
     </div>
 
     <Modal
-      open={state.showSuccess && !!note}
+      open={state.showSuccess && notes.length > 0}
       onClose={() => setDeposit((s) => ({ ...s, showSuccess: false }))}
-      title="Deposit confirmed"
-      subtitle="Funds are locked. Save your secret note now to claim later."
+      title={notes.length === 1 ? "Deposit confirmed" : `${notes.length} deposits confirmed`}
+      subtitle="Funds are locked. Save your secret notes now to claim later."
     >
-      {note ? (
+      {notes.length > 0 ? (
         <>
           <div className="rounded-xl border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-sm text-amber-200">
-            Anyone with this note can claim. Losing it means losing the funds.
+            Anyone with a note can claim it. Losing one means losing those funds.
           </div>
-          <CopyField label="Secret note" value={serializeNote(note)} />
-          <div className="flex gap-3">
-            <button onClick={() => downloadNote(note)} className="btn-ghost flex-1">
-              Download note
-            </button>
-            {txHash ? (
-              <a
-                href={`${SOURCE_CHAIN.blockExplorers?.default.url}/tx/${txHash}`}
-                target="_blank"
-                rel="noreferrer"
-                className="btn-ghost flex-1"
-              >
-                View transaction
-              </a>
-            ) : null}
+          <div className="max-h-64 space-y-3 overflow-y-auto">
+            {notes.map((n, i) => (
+              <CopyField
+                key={i}
+                label={notes.length === 1 ? "Secret note" : `Secret note ${i + 1}`}
+                value={serializeNote(n)}
+              />
+            ))}
           </div>
+          <button onClick={() => downloadNotes(notes)} className="btn-ghost w-full">
+            Download {notes.length === 1 ? "note" : "all notes"}
+          </button>
         </>
       ) : null}
     </Modal>
@@ -337,12 +409,12 @@ function DepositFlow() {
   );
 }
 
-function downloadNote(note: Note) {
-  const blob = new Blob([serializeNote(note)], { type: "text/plain" });
+function downloadNotes(notes: Note[]) {
+  const blob = new Blob([notes.map(serializeNote).join("\n")], { type: "text/plain" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `veil-note-${Date.now()}.txt`;
+  a.download = `veil-notes-${Date.now()}.txt`;
   a.click();
   URL.revokeObjectURL(url);
 }
