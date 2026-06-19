@@ -135,3 +135,22 @@ bash scripts/test_frontend_e2e.sh      # full UI: connect -> deposit -> relay ->
 
 See [docs/USAGE.md](docs/USAGE.md) for the live Sepolia -> QIE walkthrough and
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for component details.
+
+## Design references
+
+The architecture composes two well-studied lines of research:
+
+- Cross-chain ZK light client / state-inclusion proofs, where the destination
+  chain verifies a succinct proof that a source-chain state root is valid rather
+  than trusting a relayer. See zkBridge: Trustless Cross-chain Bridges Made
+  Practical, Tiancheng Xie, Jiaheng Zhang, Zerui Cheng, Fan Zhang, Yupeng Zhang,
+  Yongzheng Jia, Dan Boneh, Dawn Song, ACM CCS 2022
+  (https://eprint.iacr.org/2022/420).
+- The shielded pool (Poseidon commitment, nullifier, and Merkle membership proof
+  that unlinks deposit from withdrawal) follows the Zerocash design and its
+  fixed-denomination realization in Tornado Cash. See Zerocash: Decentralized
+  Anonymous Payments from Bitcoin, Eli Ben-Sasson, Alessandro Chiesa, Christina
+  Garman, Matthew Green, Ian Miers, Eran Tromer, Madars Virza, IEEE S&P 2014
+  (http://zerocash-project.org/paper), and the Tornado Cash protocol whitepaper,
+  Alexey Pertsev, Roman Semenov, Roman Storm, 2019
+  (https://tornado.cash/Tornado.cash_whitepaper_v1.4.pdf).

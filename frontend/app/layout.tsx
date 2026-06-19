@@ -9,9 +9,31 @@ const inter = Inter({ subsets: ["latin"], variable: "--font-sans", display: "swa
 const mono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-mono", display: "swap" });
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://veilbridge.vercel.app"),
   title: "Veil Bridge - private cross chain transfers to QIE",
   description:
     "A trustless, privacy preserving bridge from Ethereum to QIE using zero knowledge proofs.",
+  icons: {
+    icon: [
+      { url: "/favicon.ico", sizes: "any" },
+      { url: "/icon.png", type: "image/png" },
+    ],
+    shortcut: "/favicon.ico",
+    apple: "/apple-icon.png",
+  },
+  openGraph: {
+    title: "Veil Bridge - private cross chain transfers to QIE",
+    description:
+      "A trustless, privacy preserving bridge from Ethereum to QIE using zero knowledge proofs.",
+    images: [{ url: "/logo.png", width: 500, height: 500, alt: "Veil Bridge" }],
+  },
+  twitter: {
+    card: "summary",
+    title: "Veil Bridge - private cross chain transfers to QIE",
+    description:
+      "A trustless, privacy preserving bridge from Ethereum to QIE using zero knowledge proofs.",
+    images: ["/logo.png"],
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
