@@ -21,7 +21,7 @@ SRC_RPC=http://127.0.0.1:8545
 QIE_RPC=http://127.0.0.1:8546
 SRC_CHAIN_ID=11155111
 QIE_CHAIN_ID=1983
-DENOM=10000           # 0.01 USDC (6 decimals); per-note fixed denomination
+DENOM=100000          # 0.1 USDC (6 decimals); per-note fixed denomination
 LEVELS=20
 
 # anvil default account #0 (deployer + relayer). Import this into your wallet.

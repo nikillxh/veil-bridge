@@ -76,7 +76,7 @@ stand-in is freely mintable, so no testnet funds are required.
 
 The bridge moves real Sepolia USDC
 (`0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238`, 6 decimals) in fixed notes of
-0.01 USDC. On the Deposit page you choose how many identical 0.01 notes to
+0.1 USDC. On the Deposit page you choose how many identical 0.1 notes to
 create; identical denominations keep every deposit indistinguishable, which is
 what preserves the anonymity set. Each note is saved and claimed independently.
 

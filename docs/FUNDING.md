@@ -2,7 +2,7 @@
 
 You run the bridge from your own machine (deploys + relayer) with the frontend
 hosted on Vercel. The bridge moves real Sepolia USDC privately to QIE in fixed
-0.01 USDC notes. There are four logical roles. They can be separate keys or you
+0.1 USDC notes. There are four logical roles. They can be separate keys or you
 can reuse keys across roles. Below is exactly what to fund and where.
 
 ## Roles and what each needs
@@ -10,7 +10,7 @@ can reuse keys across roles. Below is exactly what to fund and where.
 | Role | Chain | Needs | Why | Suggested amount |
 |------|-------|-------|-----|------------------|
 | Deployer | Sepolia + QIE | Sepolia ETH, QIE coin | Deploy the vault (Sepolia) and updater/pool/token/verifier (QIE) | 0.05 Sepolia ETH, small QIE |
-| Depositor | Sepolia | Sepolia ETH + USDC | Approve + submit deposits; USDC is the bridged asset | 0.03 ETH + N x 0.01 USDC |
+| Depositor | Sepolia | Sepolia ETH + USDC | Approve + submit deposits; USDC is the bridged asset | 0.03 ETH + N x 0.1 USDC |
 | Relayer (server) | QIE | QIE coin | Submit `updateRoot` and the gasless `withdraw` claims | small (fees near zero) |
 | Claimer | (none) | nothing | Just an address that receives wrapped USDC | nothing |
 

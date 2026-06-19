@@ -14,22 +14,22 @@ bash scripts/e2e_local.sh
 Expected tail:
 
 ```
-==> RESULT: fresh wallet wrapped-token balance = 10000
+==> RESULT: fresh wallet wrapped-token balance = 100000
 SUCCESS: end-to-end shielded bridge worked!
 ```
 
-The balance `10000` is 0.01 wUSDC (6 decimals), the fixed per-note denomination.
+The balance `100000` is 0.1 wUSDC (6 decimals), the fixed per-note denomination.
 
 What it does:
 1. Deploys the Poseidon hasher and `ShieldedVault` on the source chain, wired to
    a local 6-decimal USDC stand-in.
 2. Deploys `BridgeUpdater`, `ShieldedPool`, `WrappedToken` (wUSDC, 6 decimals),
    and the Groth16 `WithdrawVerifier` on QIE.
-3. Makes a shielded deposit (commitment) of one 0.01 USDC note.
+3. Makes a shielded deposit (commitment) of one 0.1 USDC note.
 4. Runs the relayer once: builds the inclusion witness from `eth_getProof`,
    verifies header + MPT, and submits the proven root to QIE.
 5. From a **fresh wallet**, generates a real Groth16 proof and claims, minting
-   0.01 wUSDC.
+   0.1 wUSDC.
 
 ## B. Full stack locally with the UI
 
@@ -44,7 +44,7 @@ Open `http://localhost:3000`, connect a wallet, deposit, then claim. The script
 prints the local network details and a key to import. Locally the USDC stand-in
 is freely mintable, so the Deposit page tops up your balance automatically.
 
-On the Deposit page you pick how many 0.01 USDC notes to create (a batch of N
+On the Deposit page you pick how many 0.1 USDC notes to create (a batch of N
 identical notes). Each note is saved separately and claimed independently. The
 Claim page asks only for a note and a recipient address: the claim is submitted
 gaslessly by the relayer, so the recipient wallet needs no QIE coin.

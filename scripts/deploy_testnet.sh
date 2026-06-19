@@ -23,11 +23,11 @@ set -a; . ./.env; set +a
 
 VERCEL_PROJECT="${VERCEL_PROJECT:-veil-bridge}"
 # Testnet bridges real Sepolia USDC (6 decimals). The per-note denomination is
-# fixed at 0.01 USDC = 10000 base units; users pick how many identical notes to
+# fixed at 0.1 USDC = 100000 base units; users pick how many identical notes to
 # create. LEVELS must stay 20 to match the compiled circuit + trusted setup; do
 # not change it without recompiling.
 USDC="${USDC:-0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238}"   # Sepolia USDC
-DENOM="${DENOMINATION:-10000}"   # 0.01 USDC
+DENOM="${DENOMINATION:-100000}"   # 0.1 USDC
 LEVELS="${LEVELS:-20}"
 
 set_env_var() { # key value  -> upsert into ./.env
@@ -74,7 +74,7 @@ if [ "${SKIP_CONTRACTS:-0}" != "1" ]; then
 
   SRC_DEPLOY_BLOCK=$(cast block-number --rpc-url "$SOURCE_RPC_URL")
 
-  echo "==> [2/5] Deploying ShieldedVault for USDC $USDC (per-note 0.01 USDC) on Sepolia"
+  echo "==> [2/5] Deploying ShieldedVault for USDC $USDC (per-note 0.1 USDC) on Sepolia"
   # TOKEN_ADDRESS=USDC makes DeploySource skip the mock and wire the real token.
   SRC_OUT=$(cd contracts-source && HASHER_ADDRESS=$HASHER DENOMINATION=$DENOM LEVELS=$LEVELS \
     TOKEN_ADDRESS=$USDC \

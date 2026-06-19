@@ -25,11 +25,19 @@ async function main() {
   const denomination: bigint = await vault.denomination();
   const isNative = token === ethers.ZeroAddress;
 
-  console.log(`Depositing ${ethers.formatEther(denomination)} ${isNative ? "native" : "tokens"}`);
+  let decimals = 18;
+  let symbol = isNative ? "native" : "tokens";
+  let erc20: ethers.Contract | null = null;
+  if (!isNative) {
+    erc20 = new ethers.Contract(token, ERC20_ABI, wallet);
+    decimals = Number(await erc20.decimals().catch(() => 18));
+    symbol = await erc20.symbol().catch(() => "tokens");
+  }
+
+  console.log(`Depositing ${ethers.formatUnits(denomination, decimals)} ${symbol}`);
   console.log("commitment =", commitment);
 
-  if (!isNative) {
-    const erc20 = new ethers.Contract(token, ERC20_ABI, wallet);
+  if (!isNative && erc20) {
     const approveTx = await erc20.approve(vaultAddress, denomination);
     console.log("approve tx:", approveTx.hash);
     await approveTx.wait();

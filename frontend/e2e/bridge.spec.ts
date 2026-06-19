@@ -96,7 +96,7 @@ test("deposit then shielded claim through the UI", async ({ page }) => {
   await expect(page.getByText(/Amount per note/i)).toBeVisible();
   await expect(page.getByText("Fixed denomination", { exact: true })).toBeVisible();
 
-  // Default count is 1: deposit a single 0.01 USDC note.
+  // Default count is 1: deposit a single 0.1 USDC note.
   await page.getByRole("button", { name: /Generate note and deposit/i }).click();
 
   const dialog = page.getByRole("dialog");

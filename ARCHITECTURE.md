@@ -59,7 +59,7 @@ veil-bridge/
 
 | File | Responsibility |
 |------|----------------|
-| `e2e_local.sh` | Single local node, full CLI pipeline against a 6 decimal USDC mock at 0.01 per note. Fastest end-to-end check. |
+| `e2e_local.sh` | Single local node, full CLI pipeline against a 6 decimal USDC mock at 0.1 per note. Fastest end-to-end check. |
 | `run_local.sh` | Two anvils (chain ids 11155111 + 1983), deploys all contracts (local USDC mock, mintable), runs the relayer loop, writes `frontend/.env.local` (including server keys for the API routes), starts the dev server so the UI works with a real wallet. |
 | `deploy_testnet.sh` | Sepolia + QIE deploy wiring the vault to real USDC (legacy gas, hasher reuse, balance precheck), syncs `NEXT_PUBLIC_*` + server env to Vercel, ships production. `SKIP_CONTRACTS=1` redeploys only the frontend. |
 | `test_testnet_e2e.sh` | Live deposit -> relayer -> gasless shielded claim assertion using `./.env` addresses. |
@@ -139,7 +139,7 @@ veil-bridge/
 
 | Path | Responsibility |
 |------|----------------|
-| `app/` | App Router pages: landing, deposit, claim, docs. Deposit creates a batch of N identical 0.01 USDC notes; claim is recipient-based and gasless. |
+| `app/` | App Router pages: landing, deposit, claim, docs. Deposit creates a batch of N identical 0.1 USDC notes; claim is recipient-based and gasless. |
 | `app/api/relay/route.ts` | Server route: reads the latest vault root and submits it to `BridgeUpdater` on QIE with a server-only `RELAYER_PRIVATE_KEY`. Idempotent. |
 | `app/api/claim/route.ts` | Server route: forwards a browser-generated Groth16 proof to `ShieldedPool.withdraw`, paying QIE gas from the relayer key. The proof binds the recipient, so funds cannot be redirected; the claim wallet needs no QIE coin. |
 | `app/docs/` | Designed in-app documentation (testnet walkthrough, privacy model, architecture diagram). Authored as React, not rendered markdown. |

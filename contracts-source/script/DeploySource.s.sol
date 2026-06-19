@@ -12,12 +12,12 @@ import {MockERC20} from "../src/mocks/MockERC20.sol";
 /// Required env:
 ///   HASHER_ADDRESS  - Poseidon(2) hasher (deploy via client/src/deployPoseidon.ts)
 /// Optional env:
-///   DENOMINATION (default 1e18), LEVELS (default 20),
+///   DENOMINATION (default 100000 = 0.1 USDC at 6 decimals), LEVELS (default 20),
 ///   TOKEN_ADDRESS (default: deploy a MockERC20; address(0) => native coin)
 contract DeploySource is Script {
     function run() external {
         address hasher = vm.envAddress("HASHER_ADDRESS");
-        uint256 denomination = vm.envOr("DENOMINATION", uint256(1 ether));
+        uint256 denomination = vm.envOr("DENOMINATION", uint256(100000));
         uint32 levels = uint32(vm.envOr("LEVELS", uint256(20)));
         address token = vm.envOr("TOKEN_ADDRESS", address(type(uint160).max));
 

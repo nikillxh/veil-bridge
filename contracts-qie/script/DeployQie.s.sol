@@ -20,12 +20,12 @@ import {IWithdrawVerifier} from "../src/verifiers/IWithdrawVerifier.sol";
 ///   SP1_VERIFIER   - SP1 verifier gateway on QIE for on-chain proof verification
 ///                    (default: deploy SP1MockVerifier for native verification)
 ///   SP1_VKEY       - guest program vkey (default 0x0)
-///   DENOMINATION   - must match the source vault (default 1e18)
+///   DENOMINATION   - must match the source vault (default 100000 = 0.1 USDC at 6 decimals)
 contract DeployQie is Script {
     function run() external {
         address sourceVault = vm.envAddress("SOURCE_VAULT");
         bytes32 vkey = vm.envOr("SP1_VKEY", bytes32(0));
-        uint256 denomination = vm.envOr("DENOMINATION", uint256(1 ether));
+        uint256 denomination = vm.envOr("DENOMINATION", uint256(100000));
         address sp1 = vm.envOr("SP1_VERIFIER", address(0));
 
         vm.startBroadcast();
