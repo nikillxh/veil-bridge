@@ -3,6 +3,8 @@
 A trustless, **privacy-preserving** bridge from an EVM chain (Sepolia) into
 [QIE](https://docs.qie.digital) (EVM-compatible, testnet chain id `1983`).
 
+Live: [veilbridge.vercel.app](https://veilbridge.vercel.app)
+
 It combines three pillars:
 
 1. **On-chain vaults** - lock-and-mint with a Poseidon commitment Merkle tree.
@@ -72,17 +74,25 @@ required.
 
 ## Deploy to testnet + Vercel
 
-The deploy is intentionally gas-lean: a NATIVE-coin vault with a tiny
-denomination (no ERC20 deploy, no mint/approve), legacy gas pricing, a reused
-Poseidon hasher when one already exists, and an upfront balance precheck that
-aborts before spending if gas is too high.
+The deploy is gas-lean: a free-mint ERC20 test token (`mUSD`) vault so visitors
+can try the live site without holding a specific asset, legacy gas pricing, a
+reused Poseidon hasher when one already exists, and an upfront balance precheck
+that aborts before spending if gas is too high. It also syncs the frontend env,
+deploys to Vercel production, and aliases `veilbridge.vercel.app`.
 
 ```bash
 # Reads keys/RPCs from ./.env. MAIN must be funded on Sepolia + QIE.
-bash scripts/deploy_testnet.sh            # contracts + Vercel env + prod deploy
+bash scripts/deploy_testnet.sh            # contracts + Vercel env + prod deploy + alias
 SKIP_CONTRACTS=1 bash scripts/deploy_testnet.sh   # only redeploy the frontend
 bash scripts/test_testnet_e2e.sh          # live deposit -> relayer -> claim assert
+bash scripts/test_frontend_e2e.sh         # headless browser drives the real UI end to end
 ```
+
+Bridging roots is automated for the hosted site by a serverless route
+([`frontend/app/api/relay/route.ts`](frontend/app/api/relay/route.ts)): after a
+deposit, and again when a claim needs it, the latest vault root is submitted to
+`BridgeUpdater` on QIE using a server-only `RELAYER_PRIVATE_KEY`. For a
+continuously running, fully verified relayer use the Rust [`relayer/`](relayer).
 
 Funding note: deploying the Poseidon hasher (~2.17M gas, fixed) plus the vault
 costs roughly 0.04 ETH at ~10 gwei and ~0.07 ETH at ~19 gwei on Sepolia. Run
@@ -104,6 +114,7 @@ full assumptions and roadmap.
 ```bash
 cd contracts-source && forge test      # vault + Merkle tree
 cd contracts-qie     && forge test      # updater, pool, and a REAL Groth16 proof e2e
+bash scripts/test_frontend_e2e.sh      # full UI: connect -> deposit -> relay -> claim
 ```
 
 See [docs/USAGE.md](docs/USAGE.md) for the live Sepolia -> QIE walkthrough and

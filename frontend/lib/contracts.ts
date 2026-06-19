@@ -89,6 +89,16 @@ export const UPDATER_ABI = [
     inputs: [{ name: "root", type: "bytes32" }],
     outputs: [{ type: "bool" }],
   },
+  {
+    type: "function",
+    name: "updateRoot",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "publicValues", type: "bytes" },
+      { name: "proofBytes", type: "bytes" },
+    ],
+    outputs: [],
+  },
 ] as const;
 
 export const ERC20_ABI = [
@@ -125,5 +135,19 @@ export const ERC20_ABI = [
     stateMutability: "view",
     inputs: [{ type: "address" }, { type: "address" }],
     outputs: [{ type: "uint256" }],
+  },
+  {
+    type: "function",
+    name: "symbol",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ type: "string" }],
+  },
+  {
+    type: "function",
+    name: "decimals",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ type: "uint8" }],
   },
 ] as const;

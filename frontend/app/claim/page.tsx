@@ -77,13 +77,21 @@ function ClaimFlow() {
         chain: SOURCE_CHAIN,
         transport: http(SOURCE_CHAIN.rpcUrls.default.http[0]),
       });
-      const logs = await sourceClient.getContractEvents({
-        address: ADDRESSES.vault,
-        abi: VAULT_ABI,
-        eventName: "Deposit",
-        fromBlock: DEPLOY_BLOCK,
-        toBlock: "latest",
-      });
+      // Public RPCs cap eth_getLogs at 50k blocks; page through in safe windows.
+      const latestBlock = await sourceClient.getBlockNumber();
+      const STEP = 45000n;
+      const logs: Awaited<ReturnType<typeof sourceClient.getContractEvents>> = [];
+      for (let from = DEPLOY_BLOCK; from <= latestBlock; from += STEP + 1n) {
+        const to = from + STEP > latestBlock ? latestBlock : from + STEP;
+        const chunk = await sourceClient.getContractEvents({
+          address: ADDRESSES.vault,
+          abi: VAULT_ABI,
+          eventName: "Deposit",
+          fromBlock: from,
+          toBlock: to,
+        });
+        logs.push(...chunk);
+      }
       const ordered = logs
         .map((l) => ({
           index: Number((l as any).args.leafIndex),
@@ -104,14 +112,34 @@ function ClaimFlow() {
       // Confirm the root has been bridged + accepted on QIE.
       patch(2, { state: "active" });
       const rootHex = toBytes32(tree.root);
-      const accepted = (await qieClient.readContract({
-        address: ADDRESSES.updater,
-        abi: UPDATER_ABI,
-        functionName: "isAcceptedRoot",
-        args: [rootHex],
-      })) as boolean;
+      const checkAccepted = async () =>
+        (await qieClient.readContract({
+          address: ADDRESSES.updater,
+          abi: UPDATER_ABI,
+          functionName: "isAcceptedRoot",
+          args: [rootHex],
+        })) as boolean;
+
+      let accepted: boolean;
+      try {
+        accepted = await checkAccepted();
+      } catch {
+        throw new Error(
+          `Could not reach the bridge on ${QIE_CHAIN.name}. Check your network and retry.`,
+        );
+      }
+
       if (!accepted) {
-        throw new Error("Root not yet bridged to QIE. Wait for the relayer, then retry.");
+        // Trigger the on-demand relay, then poll until the root is bridged.
+        patch(2, { state: "active", detail: "Bridging root to QIE" });
+        await fetch("/api/relay", { method: "POST" }).catch(() => {});
+        for (let i = 0; i < 10 && !accepted; i++) {
+          await new Promise((r) => setTimeout(r, 3000));
+          accepted = await checkAccepted().catch(() => false);
+        }
+      }
+      if (!accepted) {
+        throw new Error("Root not bridged to QIE yet. Try again in a moment.");
       }
       patch(2, { state: "done", detail: rootHex });
 
@@ -143,8 +171,14 @@ function ClaimFlow() {
           0n,
           0n,
         ],
+        // QIE's gas estimation under-reports for proof-verifying calls; set an
+        // explicit, generous limit so the withdraw cannot run out of gas.
+        gas: 1_500_000n,
       });
-      await qieClient.waitForTransactionReceipt({ hash });
+      const receipt = await qieClient.waitForTransactionReceipt({ hash });
+      if (receipt.status !== "success") {
+        throw new Error("Claim transaction reverted on QIE.");
+      }
       patch(4, { state: "done" });
       setClaim((c) => ({ ...c, done: hash, showSuccess: true }));
     } catch (e: any) {

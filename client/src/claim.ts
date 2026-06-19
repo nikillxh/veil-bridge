@@ -29,7 +29,15 @@ async function main() {
   const sourceProvider = new ethers.JsonRpcProvider(sourceRpc);
   const vault = new ethers.Contract(vaultAddress, VAULT_ABI, sourceProvider);
   const fromBlock = Number(process.env.START_BLOCK ?? "0");
-  const events = await vault.queryFilter(vault.filters.Deposit(), fromBlock, "latest");
+  const latestBlock = await sourceProvider.getBlockNumber();
+  // Public RPCs cap eth_getLogs at 50k blocks; page through in safe windows.
+  const STEP = 45000;
+  const events: any[] = [];
+  for (let from = fromBlock; from <= latestBlock; from += STEP + 1) {
+    const to = Math.min(from + STEP, latestBlock);
+    const chunk = await vault.queryFilter(vault.filters.Deposit(), from, to);
+    events.push(...chunk);
+  }
 
   const leaves: { index: number; commitment: bigint }[] = events.map((e: any) => ({
     index: Number(e.args.leafIndex),

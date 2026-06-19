@@ -1,7 +1,8 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { useAccount, usePublicClient, useWriteContract } from "wagmi";
-import { formatEther, zeroAddress } from "viem";
+import { formatEther, formatUnits, zeroAddress } from "viem";
 import { NetworkGuard } from "@/components/NetworkGuard";
 import { Stepper, type Step } from "@/components/Stepper";
 import { CopyField } from "@/components/CopyField";
@@ -40,6 +41,54 @@ function DepositFlow() {
 
   const configured = ADDRESSES.vault !== zeroAddress;
 
+  const [info, setInfo] = useState<{
+    symbol: string;
+    decimals: number;
+    denom: bigint;
+    balance: bigint;
+    isErc20: boolean;
+  } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      if (!publicClient || !configured) return;
+      try {
+        const [token, denom] = (await Promise.all([
+          publicClient.readContract({ address: ADDRESSES.vault, abi: VAULT_ABI, functionName: "token" }),
+          publicClient.readContract({ address: ADDRESSES.vault, abi: VAULT_ABI, functionName: "denomination" }),
+        ])) as [`0x${string}`, bigint];
+        const isErc20 = token !== zeroAddress;
+        let symbol: string = SOURCE_CHAIN.nativeCurrency.symbol;
+        let decimals = 18;
+        let balance = 0n;
+        if (isErc20) {
+          [symbol, decimals] = (await Promise.all([
+            publicClient.readContract({ address: token, abi: ERC20_ABI, functionName: "symbol" }),
+            publicClient.readContract({ address: token, abi: ERC20_ABI, functionName: "decimals" }),
+          ])) as [string, number];
+          if (address) {
+            balance = (await publicClient.readContract({
+              address: token,
+              abi: ERC20_ABI,
+              functionName: "balanceOf",
+              args: [address],
+            })) as bigint;
+          }
+        } else if (address) {
+          balance = await publicClient.getBalance({ address });
+        }
+        if (!cancelled) setInfo({ symbol, decimals: Number(decimals), denom, balance, isErc20 });
+      } catch {
+        if (!cancelled) setInfo(null);
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [publicClient, address, configured]);
+
   function setSteps(updater: (prev: Step[]) => Step[]) {
     setDeposit((s) => ({ ...s, steps: updater(s.steps) }));
   }
@@ -63,14 +112,22 @@ function DepositFlow() {
       const fresh = await createNote();
       const commitment = toBytes32(fresh.commitment);
 
-      const [token, denom] = (await Promise.all([
-        publicClient.readContract({ address: ADDRESSES.vault, abi: VAULT_ABI, functionName: "token" }),
-        publicClient.readContract({
-          address: ADDRESSES.vault,
-          abi: VAULT_ABI,
-          functionName: "denomination",
-        }),
-      ])) as [`0x${string}`, bigint];
+      let token: `0x${string}`;
+      let denom: bigint;
+      try {
+        [token, denom] = (await Promise.all([
+          publicClient.readContract({ address: ADDRESSES.vault, abi: VAULT_ABI, functionName: "token" }),
+          publicClient.readContract({
+            address: ADDRESSES.vault,
+            abi: VAULT_ABI,
+            functionName: "denomination",
+          }),
+        ])) as [`0x${string}`, bigint];
+      } catch {
+        throw new Error(
+          `Could not reach the vault on ${SOURCE_CHAIN.name}. Check your network connection and that the deployment is live, then retry.`,
+        );
+      }
       const isErc20 = token !== zeroAddress;
 
       const flow: Step[] = [
@@ -82,6 +139,7 @@ function DepositFlow() {
             ] as Step[])
           : []),
         { label: `Deposit ${formatEther(denom)} to vault`, state: "idle" },
+        { label: "Bridge root to QIE", state: "idle" },
       ];
       setDeposit((s) => ({ ...s, steps: flow }));
 
@@ -128,6 +186,22 @@ function DepositFlow() {
       });
       await publicClient.waitForTransactionReceipt({ hash: dh });
       patch(cursor, { state: "done" });
+      cursor++;
+
+      // Bridge the new root to QIE so the claim side is ready immediately.
+      patch(cursor, { state: "active" });
+      try {
+        const res = await fetch("/api/relay", { method: "POST" });
+        const body = await res.json().catch(() => ({}));
+        patch(cursor, {
+          state: res.ok ? "done" : "error",
+          detail: res.ok ? undefined : body?.error ?? "relay failed",
+        });
+      } catch {
+        // Non-fatal: the claim page also relays + retries.
+        patch(cursor, { state: "error", detail: "Relay deferred; claim will retry." });
+      }
+
       setDeposit((s) => ({ ...s, txHash: dh, note: fresh, showSuccess: true }));
     } catch (e: any) {
       const msg = e?.shortMessage ?? e?.message ?? "Transaction failed";
@@ -157,6 +231,29 @@ function DepositFlow() {
           A new random note is generated in your browser. The commitment is sent on chain; the
           secret never leaves this device.
         </p>
+
+        <div className="rounded-xl border border-white/10 bg-ink-900/50 p-4">
+          <div className="flex items-end justify-between">
+            <div>
+              <p className="label">Deposit amount</p>
+              <p className="mt-1 text-2xl font-semibold text-white">
+                {info ? `${formatUnits(info.denom, info.decimals)} ${info.symbol}` : "..."}
+              </p>
+            </div>
+            <span className="pill text-slate-400">Fixed denomination</span>
+          </div>
+          <p className="mt-3 text-xs text-slate-500">
+            {info?.isErc20
+              ? "A fixed amount keeps every deposit identical, which is what gives the pool its anonymity set. Test tokens are minted to you automatically if your balance is low."
+              : "A fixed amount keeps every deposit identical, which is what gives the pool its anonymity set."}
+          </p>
+          {info && address ? (
+            <p className="mt-2 text-xs text-slate-500">
+              Your balance: {formatUnits(info.balance, info.decimals)} {info.symbol}
+            </p>
+          ) : null}
+        </div>
+
         <button onClick={run} disabled={busy} className="btn-primary w-full py-3">
           {busy ? "Working" : "Generate note and deposit"}
         </button>

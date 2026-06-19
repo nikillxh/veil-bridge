@@ -29,6 +29,12 @@ circuits/build/
 frontend/.next/
 out/
 
+# Playwright (frontend E2E)
+frontend/test-results/
+frontend/playwright-report/
+frontend/.last-run.json
+test-results/
+
 # Relayer / client runtime state and secrets
 relayer-state.json
 client/notes/
@@ -44,3 +50,5 @@ client/notes/
 local/
 
 skills-lock.json
+.vercel
+.env*.local

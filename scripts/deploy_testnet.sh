@@ -129,6 +129,10 @@ push_vercel_env NEXT_PUBLIC_POOL_ADDRESS "$POOL"
 push_vercel_env NEXT_PUBLIC_WRAPPED_ADDRESS "$WRAPPED"
 push_vercel_env NEXT_PUBLIC_MERKLE_LEVELS "$LEVELS"
 push_vercel_env NEXT_PUBLIC_VAULT_DEPLOY_BLOCK "$SRC_DEPLOY_BLOCK"
+# Server-only (no NEXT_PUBLIC prefix): powers the on-demand /api/relay route.
+push_vercel_env SEPOLIA_RPC_URL "$SOURCE_RPC_URL"
+push_vercel_env QIE_RPC_URL "$QIE_RPC_URL"
+[ -n "${RELAYER_PRIVATE_KEY:-}" ] && push_vercel_env RELAYER_PRIVATE_KEY "$RELAYER_PRIVATE_KEY"
 
 # Local mirror so `npm run build` reproduces the production build.
 cat > .env.production.local <<EOF
@@ -145,9 +149,16 @@ EOF
 
 echo "==> [5/5] Deploying frontend to Vercel production"
 URL=$(vercel deploy --prod --yes)
+PROD_DOMAIN="${PROD_DOMAIN:-veilbridge.vercel.app}"
+if [ -n "$URL" ]; then
+  vercel alias set "$URL" "$PROD_DOMAIN" >/dev/null 2>&1 \
+    && echo "    aliased -> https://$PROD_DOMAIN" \
+    || echo "    WARN: could not alias $PROD_DOMAIN (set it manually)"
+fi
 echo ""
 echo "============================  DEPLOYED  ============================"
 echo "Vercel:   $URL"
+echo "Domain:   https://$PROD_DOMAIN"
 echo "Vault:    $VAULT  (Sepolia)"
 echo "Pool:     $POOL  (QIE)"
 echo "Wrapped:  $WRAPPED  (QIE)"
